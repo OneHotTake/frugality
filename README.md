@@ -2,83 +2,80 @@
 
 > Claude Code. Free models. Zero compromise.
 
-Professional AI-assisted development shouldn't require a paid API subscription
-for every token. **Frugality** is the orchestration layer that makes free-tier
-models a reliable foundation — not a compromise.
+Cost-optimized AI development. Frugality routes free-tier models through Claude Code for reliable, intelligent coding assistance without subscription costs.
 
-## What it does
+## Install
 
-- **Discovers free models** via `free-coding-models` CLI, live benchmarking
-- **Routes intelligently** through claude-code-router based on task type
-- **Stays responsive** with zero-interruption safe-restart logic
-- **Monitors health** and switches models when performance degrades
-
-## Architecture
-
-```
-┌─────────────────────────────────────────┐
-│  Claude Code (Your brain, subscription)  │
-└──────────────┬──────────────────────────┘
-               │
-        ┌──────v────────┐
-        │  CCR (router) │
-        └──────┬────────┘
-               │
-    ┌──────────┼──────────┐
-    │          │          │
-   Free      Free      Free
-  Model A  Model B   Model C
-  (NVIDIA) (Groq)   (OpenRouter)
+```bash
+git clone https://github.com/OneHotTake/frugality.git
+cd frugality
+bash install.sh
 ```
 
 ## Quick start
 
+### Claude Code (hybrid mode)
+
 ```bash
-# Install
-npm install -g frugality
-
-# One-time project setup
-frug init
-
-# Start routing
-frug start
-
-# Code with free agents
-ccr code
+frug-claude
 ```
+
+Starts frugality in hybrid mode with your Claude Code subscription as primary, free-tier agents for delegated tasks.
+
+### OpenCode (free + hybrid)
+
+```bash
+frug-opencode
+```
+
+Starts frugality with OpenCode in hybrid mode.
+
+## Prerequisites
+
+- **Node.js** >= 18
+- **Claude Code** or **OpenCode** installed
+- **free-coding-models** ([repo](https://github.com/anthropics/free-coding-models))
+- **jq**, **curl** (standard utilities)
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `frug start` | Start watchdog + idle watcher |
+| `frug-claude` | Start Claude Code with hybrid mode |
+| `frug-opencode` | Start OpenCode with hybrid mode |
+| `frug start [MODE]` | Start watchdog. MODE: `--hybrid`, `--agentic`, `--opencode` |
 | `frug stop` | Stop all services |
-| `frug status` | Show current state |
+| `frug status` | Show system status |
 | `frug update [--immediate]` | Refresh model cache |
-| `frug init` | Initialize project |
 | `frug doctor` | Diagnose system |
 
-## Prerequisites
+## Operating modes
 
-- **Node.js** >= 18
-- **free-coding-models** ([install](https://github.com/anthropics/free-coding-models))
-- **CCR** (Claude Code Router)
-- **jq** (JSON processor)
-- **curl** (HTTP client)
+| Mode | Primary | Agents | Best for |
+|------|---------|--------|----------|
+| `--hybrid` | Subscription | Free-tier | Claude Code users with agents |
+| `--agentic` | Free-tier | Free-tier | Zero-cost coding |
+| `--opencode` | OpenCode | Free-tier | OpenCode with agents |
+| `--opencode --hybrid` | Free-tier + OpenCode | Free | Fully autonomous coding |
 
 ## How it works
 
-1. **Discovery**: Frugality queries `free-coding-models` for available models
-2. **Selection**: Best model selected for each task type (fast/analysis/reasoning)
-3. **Routing**: Router pushes config to CCR, which intercepts Claude Code's calls
-4. **Monitoring**: Watchdog pings models, detects degradation
-5. **Switching**: When a model degrades, bridge finds replacement, restarts safely
+1. **Discovery**: Queries `free-coding-models` for available providers
+2. **Selection**: Routes tasks to best model (NVIDIA, Groq, Cerebras, etc.)
+3. **Health**: Watchdog monitors model performance, switches on degradation
+4. **Safety**: Applies config changes only when system idle (zero-interruption)
+
+## Development
+
+```bash
+npm test           # Run tests
+npm run doctor     # Diagnose system
+npm run stress-test # Stress tests
+```
 
 ## Contributing
 
-We welcome contributions! Presets are the highest-value way to contribute.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

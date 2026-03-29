@@ -219,22 +219,42 @@ Convenience Wrappers:
   }
 };
 
-// Main
-(async () => {
-  try {
-    if (command === 'help' || command === '-h' || command === '--help') {
-      commands.help();
-    } else if (command === 'version' || command === '-v' || command === '--version') {
-      commands.version();
-    } else if (commands[command]) {
-      await commands[command](flags);
-    } else {
-      console.error(`Unknown command: ${command}`);
-      commands.help();
+// Module interface for convenience wrappers
+async function run(argArray) {
+  const cmd = argArray[0] || 'help';
+  const opts = argArray.slice(1);
+
+  if (cmd === 'help' || cmd === '-h' || cmd === '--help') {
+    commands.help();
+  } else if (cmd === 'version' || cmd === '-v' || cmd === '--version') {
+    commands.version();
+  } else if (commands[cmd]) {
+    await commands[cmd](opts);
+  } else {
+    throw new Error(`Unknown command: ${cmd}`);
+  }
+}
+
+module.exports = { run, commands };
+
+// Main - only run if invoked directly, not required
+if (require.main === module) {
+  (async () => {
+    try {
+      if (command === 'help' || command === '-h' || command === '--help') {
+        commands.help();
+      } else if (command === 'version' || command === '-v' || command === '--version') {
+        commands.version();
+      } else if (commands[command]) {
+        await commands[command](flags);
+      } else {
+        console.error(`Unknown command: ${command}`);
+        commands.help();
+        process.exit(1);
+      }
+    } catch (err) {
+      console.error(`Error: ${err.message}`);
       process.exit(1);
     }
-  } catch (err) {
-    console.error(`Error: ${err.message}`);
-    process.exit(1);
-  }
-})();
+  })();
+}

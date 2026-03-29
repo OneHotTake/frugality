@@ -1,40 +1,58 @@
-const assert = require('assert');
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert');
 const bridge = require('../src/bridge');
-const safeRestart = require('../src/safe-restart');
-const bestModel = require('../src/best-model');
-const idleWatcher = require('../src/idle-watcher');
 
-// Test bridge functions
-assert.strictEqual(typeof bridge.buildProviderConfig, 'function');
-assert.strictEqual(typeof bridge.buildManifest, 'function');
-assert.strictEqual(typeof bridge.writeManifest, 'function');
-assert.strictEqual(typeof bridge.promoteStaged, 'function');
-assert.strictEqual(typeof bridge.installPreset, 'function');
-assert.strictEqual(typeof bridge.runBridge, 'function');
+test('buildProviderConfig - creates valid provider object', () => {
+  const config = bridge.buildProviderConfig('model-id', 'API_KEY', 'https://api.example.com');
+  
+  assert.equal(config.id, 'model-id');
+  assert.equal(config.name, 'model-id');
+  assert.equal(config.base_url, 'https://api.example.com');
+  assert.ok(config.auth);
+  assert.ok(config.transformer);
+});
 
-// Test safe-restart functions
-assert.strictEqual(typeof safeRestart.getActiveConnections, 'function');
-assert.strictEqual(typeof safeRestart.isRequestInFlight, 'function');
-assert.strictEqual(typeof safeRestart.isIdle, 'function');
-assert.strictEqual(typeof safeRestart.setPendingRestart, 'function');
-assert.strictEqual(typeof safeRestart.clearPendingRestart, 'function');
-assert.strictEqual(typeof safeRestart.hasPendingRestart, 'function');
-assert.strictEqual(typeof safeRestart.restartCCR, 'function');
-assert.strictEqual(typeof safeRestart.verifyCCRHealth, 'function');
-assert.strictEqual(typeof safeRestart.safeRestart, 'function');
+test('buildProviderConfig - uses env var in auth key', () => {
+  const config = bridge.buildProviderConfig('test-model', 'MY_KEY', 'https://api.example.com');
+  assert.equal(config.auth.api_key, '${MY_KEY}');
+});
 
-// Test best-model functions
-assert.strictEqual(typeof bestModel.queryFreeModels, 'function');
-assert.strictEqual(typeof bestModel.extractProviderKey, 'function');
-assert.strictEqual(typeof bestModel.selectByTaskType, 'function');
-assert.strictEqual(typeof bestModel.writeCache, 'function');
-assert.strictEqual(typeof bestModel.readCache, 'function');
-assert.strictEqual(typeof bestModel.getBestModel, 'function');
-assert.strictEqual(typeof bestModel.refreshAll, 'function');
+test('buildManifest - creates valid Router config', () => {
+  const models = {
+    default: { id: 'model-a', config: {} },
+    background: { id: 'model-b', config: {} },
+    think: { id: 'model-c', config: {} },
+    longContext: { id: 'model-d', config: {} }
+  };
+  
+  const manifest = bridge.buildManifest(models);
+  
+  assert.equal(manifest.version, '1.0.0');
+  assert.ok(manifest.Router);
+  assert.ok(manifest.Router.default);
+  assert.ok(manifest.Providers);
+});
 
-// Test idle-watcher functions
-assert.strictEqual(typeof idleWatcher.checkAndApplyPending, 'function');
-assert.strictEqual(typeof idleWatcher.rotateLogs, 'function');
-assert.strictEqual(typeof idleWatcher.start, 'function');
-assert.strictEqual(typeof idleWatcher.stop, 'function');
-assert.strictEqual(typeof idleWatcher.isRunning, 'function');
+test('buildManifest - throws without default model', () => {
+  const models = {
+    background: { id: 'model-b', config: {} }
+  };
+  
+  assert.throws(() => {
+    bridge.buildManifest(models);
+  }, /default required/);
+});
+
+test('buildManifest - includes Providers array', () => {
+  const models = {
+    default: { id: 'model-a', config: {} }
+  };
+  
+  const manifest = bridge.buildManifest(models);
+  
+  assert.ok(Array.isArray(manifest.Providers));
+  assert.ok(manifest.Providers.length > 0);
+});
+
