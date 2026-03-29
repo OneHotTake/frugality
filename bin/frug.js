@@ -93,14 +93,17 @@ const printStatus = (status) => {
 const printHelp = () => {
   printBanner();
   console.log(format.section('Commands'));
-  console.log(`  ${colors.green}start${colors.reset}              Start Frugality (proxy mode)`);
-  console.log(`  ${colors.green}start --agentic${colors.reset}    Start in agentic mode (recommended)`);
+  console.log(`  ${colors.green}start${colors.reset}              Start Frugality (proxy mode - Claude Code)`);
+  console.log(`  ${colors.green}start --opencode${colors.reset}   Start for OpenCode (recommended for OpenCode users)`);
+  console.log(`  ${colors.green}start --agentic${colors.reset}   Start in agentic mode (Claude Code - recommended)`);
+  console.log(`  ${colors.green}start --light${colors.reset}     Start in light mode (minimal)`);
   console.log(`  ${colors.green}stop${colors.reset}               Stop Frugality`);
   console.log(`  ${colors.green}status${colors.reset}             Show system status`);
-  console.log(`  ${colors.green}agent status${colors.reset}       Show agentic mode details`);
+  console.log(`  ${colors.green}agent status${colors.reset}       Show agentic mode details (Claude Code)`);
   console.log(`  ${colors.green}agent models${colors.reset}      List cached models`);
   console.log(`  ${colors.green}agent refresh${colors.reset}     Refresh model cache`);
   console.log(`  ${colors.green}update${colors.reset}            Update models`);
+  console.log(`  ${colors.green}update --opencode${colors.reset} Update models for OpenCode`);
   console.log(`  ${colors.green}doctor${colors.reset}            Diagnose issues`);
   console.log(`  ${colors.green}interactive${colors.reset}        Interactive mode`);
   console.log(`  ${colors.green}config${colors.reset}            Edit configuration`);
@@ -109,6 +112,7 @@ const printHelp = () => {
   console.log();
   console.log(format.dim('Quick aliases:'));
   console.log(`  frug-now     = start --agentic`);
+  console.log(`  frug-open    = start --opencode`);
   console.log(`  frug-doc     = help`);
 };
 
@@ -159,6 +163,8 @@ const frug = {
         return frug.commands.start(parsed.positional.slice(1), parsed.flags);
       case 'agent':
         return frug.commands.agent(parsed.positional.slice(1), parsed.flags);
+      case 'opencode':
+        return frug.commands.opencode(parsed.positional.slice(1), parsed.flags);
       case 'stop':
         return frug.commands.stop(parsed.positional.slice(1), parsed.flags);
       case 'status':
@@ -187,6 +193,11 @@ const frug = {
       
       const isAgentic = flags.agentic || flags.a;
       const isLight = flags.light || flags.l;
+      const isOpenCode = flags.opencode || flags.o;
+      
+      if (isOpenCode) {
+        return frug.commands.startOpenCode(opts, flags);
+      }
       
       if (isAgentic) {
         return frug.commands.startAgentic(opts, flags);
@@ -240,6 +251,38 @@ const frug = {
       };
     },
 
+    startOpenCode: (opts, flags) => {
+      ensureDirs();
+      
+      const bestModel = require('../packages/core/src/best-model');
+      const idleWatcher = require('../packages/core/src/idle-watcher');
+      
+      bestModel.refreshAll().then(() => {
+      }).catch(() => {
+      });
+      
+      const iwResult = idleWatcher.start({ pollInterval: 10000 });
+      
+      const modeFile = path.join(defaults.STATE_DIR, 'opencode-mode');
+      fs.writeFileSync(modeFile, JSON.stringify({
+        mode: 'opencode',
+        startedAt: new Date().toISOString(),
+        version: defaults.VERSION,
+        freeModels: 'https://github.com/anthropics/free-coding-models'
+      }, null, 2));
+      
+      return {
+        success: true,
+        mode: 'opencode',
+        message: 'Frugality started for OpenCode - using free-tier models',
+        idleWatcher: iwResult,
+        skillPath: 'OPENCODE.md',
+        cacheDir: path.join(process.env.HOME || '/home/user', '.frugality/cache'),
+        opencodeDir: path.join(process.env.HOME || '/home/user', '.opencode'),
+        instructions: 'Place OPENCODE.md in your project root for OpenCode to read'
+      };
+    },
+
     startLight: (opts, flags) => {
       ensureDirs();
       
@@ -270,6 +313,103 @@ const frug = {
         default:
           return { error: `Unknown agent action: ${action}` };
       }
+    },
+
+    opencode: (opts, flags) => {
+      const action = opts[0] || 'status';
+      
+      switch (action) {
+        case 'status':
+          return frug.commands.opencodeStatus(flags);
+        case 'refresh':
+          return frug.commands.opencodeRefresh(flags);
+        case 'models':
+          return frug.commands.opencodeModels(flags);
+        case 'init':
+          return frug.commands.opencodeInit(flags);
+        default:
+          return { error: `Unknown opencode action: ${action}` };
+      }
+    },
+
+    opencodeStatus: (flags) => {
+      const modeFile = path.join(defaults.STATE_DIR, 'opencode-mode');
+      let mode = { mode: 'stopped' };
+      
+      if (fs.existsSync(modeFile)) {
+        try {
+          mode = JSON.parse(fs.readFileSync(modeFile, 'utf8'));
+        } catch (e) {
+          mode = { mode: 'unknown' };
+        }
+      }
+      
+      const cacheDir = path.join(process.env.HOME || '/home/user', '.frugality/cache');
+      const cacheFiles = fs.existsSync(cacheDir) 
+        ? fs.readdirSync(cacheDir).filter(f => f.endsWith('.txt'))
+        : [];
+      
+      const opencodeDir = path.join(process.env.HOME || '/home/user', '.opencode');
+      const opencodeExists = fs.existsSync(opencodeDir);
+      
+      return {
+        version: defaults.VERSION,
+        mode: mode.mode,
+        startedAt: mode.startedAt,
+        cacheFiles,
+        opencodeInstalled: opencodeExists,
+        opencodeDir,
+        freeModelsUrl: 'https://github.com/anthropics/free-coding-models'
+      };
+    },
+
+    opencodeRefresh: (flags) => {
+      const bestModel = require('../packages/core/src/best-model');
+      
+      bestModel.refreshAll().then(result => {
+        return { success: true, refreshed: true, result };
+      }).catch(err => {
+        return { success: false, error: err.message };
+      });
+      
+      return { success: true, message: 'Model cache refresh initiated for OpenCode' };
+    },
+
+    opencodeModels: (flags) => {
+      const cacheDir = path.join(process.env.HOME || '/home/user', '.frugality/cache');
+      const models = {};
+      
+      if (fs.existsSync(cacheDir)) {
+        const files = fs.readdirSync(cacheDir);
+        for (const file of files) {
+          if (file.endsWith('.txt')) {
+            const modelType = file.replace('.txt', '');
+            models[modelType] = fs.readFileSync(path.join(cacheDir, file), 'utf8').trim();
+          }
+        }
+      }
+      
+      return { models };
+    },
+
+    opencodeInit: (flags) => {
+      const opencodeDir = path.join(process.env.HOME || '/home/user', '.opencode');
+      
+      if (!fs.existsSync(opencodeDir)) {
+        fs.mkdirSync(opencodeDir, { recursive: true });
+      }
+      
+      const presetsDir = path.join(opencodeDir, 'presets');
+      if (!fs.existsSync(presetsDir)) {
+        fs.mkdirSync(presetsDir, { recursive: true });
+      }
+      
+      return {
+        success: true,
+        message: 'OpenCode directories initialized',
+        opencodeDir,
+        presetsDir
+      };
     },
 
     agentStatus: (flags) => {
@@ -334,9 +474,14 @@ const frug = {
       const wdResult = watchdog.stop();
       const iwResult = idleWatcher.stop();
       
-      const modeFile = path.join(defaults.STATE_DIR, 'agentic-mode');
-      if (fs.existsSync(modeFile)) {
-        fs.unlinkSync(modeFile);
+      const agenticModeFile = path.join(defaults.STATE_DIR, 'agentic-mode');
+      const opencodeModeFile = path.join(defaults.STATE_DIR, 'opencode-mode');
+      
+      if (fs.existsSync(agenticModeFile)) {
+        fs.unlinkSync(agenticModeFile);
+      }
+      if (fs.existsSync(opencodeModeFile)) {
+        fs.unlinkSync(opencodeModeFile);
       }
       
       return {
@@ -354,11 +499,20 @@ const frug = {
       const wdStatus = watchdog.status();
       const iwRunning = idleWatcher.isRunning();
       
-      const modeFile = path.join(defaults.STATE_DIR, 'agentic-mode');
       let mode = 'proxy';
-      if (fs.existsSync(modeFile)) {
+      
+      const agenticModeFile = path.join(defaults.STATE_DIR, 'agentic-mode');
+      const opencodeModeFile = path.join(defaults.STATE_DIR, 'opencode-mode');
+      
+      if (fs.existsSync(agenticModeFile)) {
         try {
-          mode = JSON.parse(fs.readFileSync(modeFile, 'utf8')).mode || 'proxy';
+          mode = JSON.parse(fs.readFileSync(agenticModeFile, 'utf8')).mode || 'proxy';
+        } catch (e) {
+          mode = 'unknown';
+        }
+      } else if (fs.existsSync(opencodeModeFile)) {
+        try {
+          mode = JSON.parse(fs.readFileSync(opencodeModeFile, 'utf8')).mode || 'opencode';
         } catch (e) {
           mode = 'unknown';
         }
@@ -439,6 +593,7 @@ const frug = {
       const dirs = [
         path.join(process.env.HOME || '/home/user', '.frugality'),
         path.join(process.env.HOME || '/home/user', '.claude-code-router'),
+        path.join(process.env.HOME || '/home/user', '.opencode'),
       ];
       
       for (const dir of dirs) {
@@ -484,8 +639,9 @@ const frug = {
         version: defaults.VERSION,
         tagline: 'Cost-Optimized AI Development',
         commands: [
-          { cmd: 'start', desc: 'Start proxy mode (CCR as router)', alias: '' },
-          { cmd: 'start --agentic', desc: 'Start agentic mode (Claude as router)', alias: 'frug-now' },
+          { cmd: 'start', desc: 'Start proxy mode (Claude Code)', alias: '' },
+          { cmd: 'start --opencode', desc: 'Start for OpenCode', alias: 'frug-open' },
+          { cmd: 'start --agentic', desc: 'Start agentic mode (Claude Code)', alias: 'frug-now' },
           { cmd: 'start --light', desc: 'Start light mode (minimal)', alias: '' },
           { cmd: 'agent status', desc: 'Show agentic mode status', alias: '' },
           { cmd: 'agent models', desc: 'List cached models', alias: '' },
@@ -493,6 +649,7 @@ const frug = {
           { cmd: 'stop', desc: 'Stop the system', alias: '' },
           { cmd: 'status', desc: 'Show system status', alias: '' },
           { cmd: 'update', desc: 'Update models', alias: '' },
+          { cmd: 'update --opencode', desc: 'Update models for OpenCode', alias: '' },
           { cmd: 'update --agentic', desc: 'Update agentic cache', alias: '' },
           { cmd: 'doctor', desc: 'Diagnose issues', alias: '' },
           { cmd: 'config', desc: 'Manage configuration', alias: '' },

@@ -1,22 +1,16 @@
 # Configuration Guide
 
+Frugality supports two integrations: OpenCode and Claude Code. Choose the configuration that matches your setup.
+
 ## Environment Variables
 
 Frugality can be configured using environment variables. The following variables are supported:
 
-### Core Configuration
+### Common Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `HOME` | Required | User home directory for state storage |
-| `CCR_PORT` | 3456 | Port for Claude Code Router |
-| `CCR_CONFIG` | ~/.claude-code-router/config.json | CCR configuration file path |
-
-### Directory Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CCR_PRESETS_DIR` | ~/.claude-code-router/presets | Presets directory |
 | `LOG_DIR` | ~/.frugality/logs | Log directory |
 | `STATE_DIR` | ~/.frugality/state | State directory |
 | `CACHE_DIR` | ~/.frugality/cache | Cache directory |
@@ -28,7 +22,7 @@ Frugality can be configured using environment variables. The following variables
 | `WATCHDOG_INTERVAL_MS` | 300000 | Health check interval (5 minutes) |
 | `PROACTIVE_UPDATE_MS` | 1800000 | Proactive update interval (30 minutes) |
 | `PING_TIMEOUT_MS` | 8000 | Health check timeout |
-| `MAX_CCR_RESTART_ATTEMPTS` | 3 | Maximum restart attempts |
+| `MAX_RESTART_ATTEMPTS` | 3 | Maximum restart attempts |
 
 ### Model Configuration
 
@@ -58,6 +52,20 @@ Frugality can be configured using environment variables. The following variables
 |----------|---------|-------------|
 | `LOG_MAX_SIZE_BYTES` | 5242880 | Max log file size (5MB) |
 
+### OpenCode Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENCODE_PRESETS_DIR` | ~/.opencode/presets | OpenCode presets directory |
+
+### Claude Code Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CCR_PORT` | 3456 | Port for Claude Code Router |
+| `CCR_CONFIG` | ~/.claude-code-router/config.json | CCR configuration file path |
+| `CCR_PRESETS_DIR` | ~/.claude-code-router/presets | CCR presets directory |
+
 ## State Files
 
 Frugality maintains state in the following files:
@@ -69,6 +77,29 @@ Frugality maintains state in the following files:
 - `~/.frugality/cache/model-cache.json` - Model selection cache
 
 ## Preset Format
+
+### OpenCode Presets
+
+Presets are stored in `~/.opencode/presets/<name>/manifest.json`:
+
+```json
+{
+  "version": "1.0",
+  "models": [
+    {
+      "id": "claude-3-haiku",
+      "name": "Claude 3 Haiku",
+      "provider": "anthropic",
+      "tier": "S",
+      "capabilities": ["chat"],
+      "metadata": {}
+    }
+  ],
+  "createdAt": "2024-01-01T00:00:00.000Z"
+}
+```
+
+### Claude Code Presets
 
 Presets are stored in `~/.claude-code-router/presets/<name>/manifest.json`:
 
@@ -91,9 +122,28 @@ Presets are stored in `~/.claude-code-router/presets/<name>/manifest.json`:
 
 ## Example Configuration
 
+### OpenCode
+
+```bash
+# Set custom directories
+export OPENCODE_PRESETS_DIR="$HOME/.opencode/presets"
+export LOG_DIR="$HOME/.frugality/logs"
+export STATE_DIR="$HOME/.frugality/state"
+
+# Adjust timing
+export WATCHDOG_INTERVAL_MS=60000
+export IDLE_POLL_MS=5000
+
+# Start the system
+node bin/frug.js start
+```
+
+### Claude Code
+
 ```bash
 # Set custom directories
 export CCR_PRESETS_DIR="$HOME/.ccr/presets"
+export CCR_CONFIG="$HOME/.ccr/config.json"
 export LOG_DIR="$HOME/.frugality/logs"
 export STATE_DIR="$HOME/.frugality/state"
 
