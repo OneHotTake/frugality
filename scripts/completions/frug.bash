@@ -1,45 +1,33 @@
-# Frugality Bash Completion
+#!/bin/bash
+# Bash completions for frugal-claude and frugal-opencode
 
-_frug() {
-  local cur prev opts
-  COMPREPLY=()
-  cur="${COMP_WORDS[COMP_CWORD]}"
-  prev="${COMP_WORDS[COMP_CWORD-1]}"
-  
-  opts="start stop status update doctor version help agent"
-  start_opts="--agentic -a --light"
-  agent_opts="status models refresh"
-  
-  case "${COMP_CWORD}" in
-    1)
-      COMPREPLY=($(compgen -W "${opts}" -- ${cur}))
-      return 0
-      ;;
-    2)
-      case "${prev}" in
-        start)
-          COMPREPLY=($(compgen -W "${start_opts}" -- ${cur}))
-          return 0
-          ;;
-        agent)
-          COMPREPLY=($(compgen -W "${agent_opts}" -- ${cur}))
-          return 0
-          ;;
-      esac
-      ;;
-  esac
-  
-  COMPREPLY=($(compgen -f -- ${cur}))
-  return 0
+_frugal_claude() {
+    local cur prev
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+    case "${prev}" in
+        frugal-claude)
+            COMPREPLY=($(compgen -W "--help --version --print-only" -- ${cur}))
+            return 0
+            ;;
+    esac
 }
 
-complete -F _frug frug
-complete -F _frug node
-complete -F _frug npm run
+_frugal_opencode() {
+    local cur prev
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-complete -F _frug frug-start
-complete -F _frug frug-stop
-complete -F _frug frug-status
-complete -F _frug frug-agent
-complete -F _frug frug-now
-complete -F _frug frug-doctor
+    case "${prev}" in
+        frugal-opencode)
+            COMPREPLY=($(compgen -W "--help --version" -- ${cur}))
+            return 0
+            ;;
+    esac
+}
+
+complete -F _frugal_claude frugal-claude
+complete -F _frugal_opencode frugal-opencode

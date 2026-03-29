@@ -1,61 +1,65 @@
-# Frugality — Operations Guide
+# Frugality — Cost-Optimized AI Development
 
-This is the frugality repository. We use frugality itself to develop frugality.
+Frugality is a lightweight orchestration tool that automatically discovers and configures the best free-tier AI models for Claude Code and OpenCode.
 
-## Project Overview
+## Simplified Architecture
 
-Frugality is a cost-optimized AI orchestration layer for Claude Code. It discovers free-tier models, routes work intelligently, and monitors health with zero-interruption restarts.
+Frugality has been refactored to a minimal, high-utility structure:
 
-## Architecture
-
-- **`packages/core/`** — Model selection, bridging, safe-restart logic
-- **`packages/watchdog/`** — Health monitoring, proactive updates
-- **`packages/skill/`** — Delegation guide for sub-agents
-- **`bin/frug.js`** — CLI entry point
-- **`config/defaults.js`** — Single source of truth for all settings
-
-## Development Commands
-
-```bash
-npm test                # Run unit tests
-npm run stress-test     # Full integration test
-npm run doctor          # Diagnose issues
-npm run start           # Start the system
-npm run lint            # Check syntax
+```
+frugality/
+├── bin/
+│   ├── frugal-claude       # Wrapper: update CCR + launch Claude
+│   └── frugal-opencode    # Wrapper: update OpenCode + launch OpenCode
+├── .frugality/
+│   ├── cache/             # Model discovery cache
+│   └── logs/             # Operation logs
+├── scripts/
+│   ├── install.sh        # Installation script
+│   └── completions/      # Shell completions
+├── frugality.py          # Main orchestration script (Python)
+└── README.md             # Documentation
 ```
 
-## AI Orchestration
+## How It Works
 
-This repo uses its own delegation system. When working here:
+1. **Discovery**: `frugality.py` runs `free-coding-models --json` to discover available models
+2. **Tier Mapping**: Maps models to routing tiers (default, background, think, longContext)
+3. **Config Generation**: Generates CCR config with Providers + Router
+4. **Atomic Write**: Uses temp file + rename for safe JSON updates
 
-**Delegate immediately:**
-- Test generation
-- Documentation writing
-- Boilerplate generation
+## Commands
 
-**You handle:**
-- Logic design (bridge, safe-restart, routing decisions)
-- UX decisions (CLI commands, error messages)
-- Code review before commits
+| Command | Description |
+|---------|-------------|
+| `frugal-claude` | Update CCR config + launch Claude Code |
+| `frugal-opencode` | Configure OpenCode + launch OpenCode |
+| `python3 frugality.py` | Run config update only |
 
-Reference `packages/skill/SKILL.md` for full delegation guide.
+## Configuration Files
 
-## Session Startup
+- **CCR Config**: `~/.claude-code-router/config.json`
+- **OpenCode Config**: `~/.config/opencode/opencode.json` (managed by free-coding-models)
+- **API Keys**: `~/.free-coding-models.json`
 
-1. Read `CLAUDE.md` ← you are here
-2. Read `.ai/CURRENT_TASK.md`
-3. Read `.ai/REPO_MAP.md`
-4. Check `.ai/FAILURES.ndjson` for blockers
-5. Inspect `.ai/MODEL_STATE.json` for routes
-6. Begin work — delegate when appropriate
+## Model Tier Reference
 
-## State Files
+| Tier | SWE Score | Use Case |
+|------|-----------|----------|
+| S+ | ≥70% | Complex refactors, GitHub issues |
+| S | 60-70% | General workhorse |
+| A+/A | 40-60% | Secondary tasks |
+| B+ | 30-40% | Small changes |
 
-- `.ai/CURRENT_TASK.md` — what we're working on
-- `.ai/REPO_MAP.md` — repository structure
-- `.ai/MODEL_STATE.json` — current routing config
-- `.ai/FAILURES.ndjson` — sub-agent failures (if any)
+## Development
 
-## Version
+```bash
+# Test configuration
+python3 frugality.py
 
-v0.1.0 — Initial release
+# Check CCR status
+ccr status
+
+# View logs
+tail -f ~/.claude-code-router/logs/ccr-*.log
+```

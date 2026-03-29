@@ -1,0 +1,4 @@
+#!/bin/bash
+# Launch OpenCode with best S-tier model
+# free-coding-models handles config automatically
+exec free-coding-models --opencode --tier S "$@"

@@ -1,165 +1,141 @@
-#!/usr/bin/env bash
-
+#!/bin/bash
 set -e
 
-FRUG_DIR="${FRUG_DIR:-$HOME/.frugality}"
-FRUG_BIN="$FRUG_DIR/bin"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
+echo "=========================================="
+echo "  Frugality Installation"
+echo "=========================================="
+echo ""
 
-log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
-log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+# Check dependencies
+echo "Checking dependencies..."
 
-echo -e "${CYAN}"
-echo "╔═══════════════════════════════════════════════════╗"
-echo "║         Frugality Installer v0.2.0                 ║"
-echo "║    Cost-Optimized AI Development Setup            ║"
-echo "╚═══════════════════════════════════════════════════╝"
-echo -e "${NC}"
-
-install_frug() {
-  log_info "Creating Frugality directory..."
-  mkdir -p "$FRUG_DIR"
-  mkdir -p "$FRUG_DIR/bin"
-  mkdir -p "$FRUG_DIR/state"
-  mkdir -p "$FRUG_DIR/cache"
-  mkdir -p "$FRUG_DIR/logs"
-  
-  FRUG_SCRIPT="# Frugality - Cost-Optimized AI Development
-export FRUG_DIR=\"$FRUG_DIR\"
-export PATH=\"\$FRUG_DIR/bin:\$PATH\"
-
-# Aliases for quick access
-alias frug='node \$FRUG_DIR/bin/frug.js'
-alias frug-start='frug start'
-alias frug-stop='frug stop'
-alias frug-status='frug status'
-alias frug-agent='frug agent'
-alias frug-hybrid='frug start --hybrid'
-alias frug-doctor='frug doctor'
-
-# Quick: start coding with hybrid mode
-alias code='frug-hybrid'
-"
-  
-  log_info "Adding to shell configuration..."
-  
-  for rc_file in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do
-    if [ -f "$rc_file" ]; then
-      if ! grep -q "Frugality" "$rc_file" 2>/dev/null; then
-        echo "$FRUG_SCRIPT" >> "$rc_file"
-        log_success "Added to $rc_file"
-        break
-      fi
-    fi
-  done
-  
-  if [ -f "$HOME/.zshrc" ]; then
-    if ! grep -q "Frugality" "$HOME/.zshrc" 2>/dev/null; then
-      echo "$FRUG_SCRIPT" >> "$HOME/.zshrc"
-      log_success "Added to ~/.zshrc"
-    fi
-  fi
-  
-  log_info "Installing frug binaries..."
-  cp "$PROJECT_DIR/bin/frug.js" "$FRUG_DIR/bin/frug.js"
-  cp "$PROJECT_DIR/bin/frug-claude.js" "$FRUG_DIR/bin/frug-claude.js"
-  cp "$PROJECT_DIR/bin/frug-opencode.js" "$FRUG_DIR/bin/frug-opencode.js"
-  chmod +x "$FRUG_DIR/bin/frug.js"
-  chmod +x "$FRUG_DIR/bin/frug-claude.js"
-  chmod +x "$FRUG_DIR/bin/frug-opencode.js"
-
-  log_success "Frugality installed successfully!"
-  echo ""
-  echo -e "${GREEN}Quick start:${NC}"
-  echo "  source ~/.bashrc    # or ~/.zshrc"
-  echo "  frug-claude         # Start Claude Code in hybrid mode"
-  echo ""
-  echo -e "${YELLOW}For developers, use npm link:${NC}"
-  echo "  cd $PROJECT_DIR && npm link"
-  echo "  frug-claude --help"
-}
-
-uninstall_frug() {
-  log_info "Removing Frugality..."
-  
-  for rc_file in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile" "$HOME/.zshrc"; do
-    if [ -f "$rc_file" ]; then
-      sed -i '/^# Frugality/,/^code$/d' "$rc_file" 2>/dev/null || true
-    fi
-  done
-  
-  rm -rf "$FRUG_DIR"
-  rm -f "$HOME/.config/autostart/frugality.desktop"
-  
-  log_success "Frugality uninstalled!"
-}
-
-setup_auto_start() {
-  log_info "Setting up auto-start..."
-  
-  mkdir -p "$HOME/.config/autostart"
-  
-  cat > "$HOME/.config/autostart/frugality.desktop" << EOF
-[Desktop Entry]
-Type=Application
-Name=Frugality
-Comment=Cost-Optimized AI Development
-Exec=node $FRUG_DIR/bin/frug.js start --hybrid
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
-EOF
-  
-  log_success "Auto-start configured!"
-}
-
-show_status() {
-  echo -e "${BLUE}Current Status:${NC}"
-  echo "  FRUG_DIR: $FRUG_DIR"
-  echo "  Binary: $FRUG_DIR/bin/frug.js"
-  
-  if [ -f "$FRUG_DIR/state/agentic-mode" ]; then
-    MODE=$(cat "$FRUG_DIR/state/agentic-mode" | grep -o '"mode":"[^"]*"' | cut -d'"' -f4)
-    STARTED=$(cat "$FRUG_DIR/state/agentic-mode" | grep -o '"startedAt":"[^"]*"' | cut -d'"' -f4)
-    echo -e "  ${GREEN}Status: Running ($MODE mode)${NC}"
-    echo "  Started: $STARTED"
-  elif pgrep -f "frug.js" > /dev/null 2>&1; then
-    echo -e "  ${GREEN}Status: Running (proxy mode)${NC}"
-  else
-    echo -e "  ${YELLOW}Status: Stopped${NC}"
-  fi
-  
-  if [ -d "$FRUG_DIR/cache" ]; then
-    CACHE_COUNT=$(ls "$FRUG_DIR/cache" 2>/dev/null | wc -l)
-    echo "  Cache files: $CACHE_COUNT"
-  fi
-}
-
-case "${1:-install}" in
-  install)
-    install_frug
-    ;;
-  uninstall|remove)
-    uninstall_frug
-    ;;
-  autostart)
-    setup_auto_start
-    ;;
-  status)
-    show_status
-    ;;
-  *)
-    echo "Usage: $0 {install|uninstall|autostart|status}"
+# Check Python
+if ! command -v python3 &> /dev/null; then
+    echo "Error: Python 3 is required but not installed."
     exit 1
-    ;;
-esac
+fi
+echo "✓ Python 3: $(python3 --version)"
+
+# Check Node.js
+if ! command -v node &> /dev/null; then
+    echo "Error: Node.js is required but not installed."
+    exit 1
+fi
+echo "✓ Node.js: $(node --version)"
+
+# Check npm
+if ! command -v npm &> /dev/null; then
+    echo "Error: npm is required but not installed."
+    exit 1
+fi
+echo "✓ npm: $(npm --version)"
+
+echo ""
+echo "=========================================="
+echo "  Installing Dependencies"
+echo "=========================================="
+echo ""
+
+# Install free-coding-models if not already installed
+if ! command -v free-coding-models &> /dev/null; then
+    echo "Installing free-coding-models..."
+    npm install -g free-coding-models
+    echo "✓ free-coding-models installed"
+else
+    echo "✓ free-coding-models already installed"
+fi
+
+# Install Claude Code Router if not already installed
+if ! command -v ccr &> /dev/null; then
+    echo "Installing Claude Code Router..."
+    npm install -g @musistudio/claude-code-router
+    echo "✓ Claude Code Router installed"
+else
+    echo "✓ Claude Code Router already installed"
+fi
+
+# Verify installations
+echo ""
+echo "=========================================="
+echo "  Verifying Installations"
+echo "=========================================="
+echo ""
+
+echo "free-coding-models: $(which free-coding-models)"
+echo "ccr: $(which ccr)"
+
+# Test free-coding-models
+echo ""
+echo "Testing free-coding-models..."
+if free-coding-models --json --hide-unconfigured &> /dev/null; then
+    echo "✓ free-coding-models is working"
+else
+    echo "⚠ Warning: free-coding-models may need configuration"
+fi
+
+# Create necessary directories
+echo ""
+echo "=========================================="
+echo "  Creating Directories"
+echo "=========================================="
+echo ""
+
+mkdir -p ~/.frugality/cache
+mkdir -p ~/.frugality/logs
+echo "✓ Created ~/.frugality/"
+
+# Create bin symlinks or add to PATH
+echo ""
+echo "=========================================="
+echo "  Setting Up Command Wrappers"
+echo "=========================================="
+echo ""
+
+# Check if we can create symlinks (likely if /usr/local/bin is writable)
+if [ -w /usr/local/bin ] || [ "$EUID" = 0 ]; then
+    echo "Creating symlinks in /usr/local/bin..."
+    ln -sf "$PROJECT_DIR/bin/frugal-claude" /usr/local/bin/frugal-claude
+    ln -sf "$PROJECT_DIR/bin/frugal-opencode" /usr/local/bin/frugal-opencode
+    echo "✓ Symlinks created"
+    echo ""
+    echo "Commands available: frugal-claude, frugal-opencode"
+else
+    echo "Cannot write to /usr/local/bin (permission denied)"
+    echo ""
+    echo "Add the following to your ~/.bashrc or ~/.zshrc:"
+    echo ""
+    echo "  export PATH=\"\$PATH:$PROJECT_DIR/bin\""
+    echo ""
+    echo "Then run: source ~/.bashrc (or ~/.zshrc)"
+fi
+
+# Run initial configuration
+echo ""
+echo "=========================================="
+echo "  Running Initial Configuration"
+echo "=========================================="
+echo ""
+
+cd "$PROJECT_DIR"
+python3 frugality.py
+
+# Start CCR if not running
+echo ""
+echo "Starting Claude Code Router..."
+ccr start || echo "Note: CCR may already be running or installed differently"
+
+echo ""
+echo "=========================================="
+echo "  Installation Complete!"
+echo "=========================================="
+echo ""
+echo "Next steps:"
+echo "  1. Configure your API keys in ~/.free-coding-models.json"
+echo "  2. Run 'frugal-claude' to start Claude Code with routing"
+echo "  3. Or run 'frugal-opencode' to start OpenCode"
+echo ""
+echo "For more info, see: $PROJECT_DIR/README.md"
+echo ""
