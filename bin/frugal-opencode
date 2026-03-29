@@ -1,5 +1,4 @@
 #!/bin/bash
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR/.."
-python3 frugality.py
-opencode "$@"
+# Launch OpenCode with best S-tier model
+# free-coding-models handles config automatically
+exec free-coding-models --opencode --tier S "$@"

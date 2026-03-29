@@ -3,24 +3,30 @@ import json
 import os
 import subprocess
 import tempfile
-import shutil
 from pathlib import Path
 
 HOME = str(Path.home())
 FCM_CONFIG_PATH = os.path.join(HOME, ".free-coding-models.json")
 CCR_CONFIG_PATH = os.path.join(HOME, ".claude-code-router", "config.json")
-OPENCODE_CONFIG_PATH = "opencode.json"
 
-
-def run_command(cmd):
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, shell=True, check=True
-        )
-        return result.stdout
-    except subprocess.CalledProcessError as e:
-        print(f"Error running command: {e}")
-        return None
+PROVIDER_BASE_URLS = {
+    "nvidia": "https://integrate.api.nvidia.com/v1/chat/completions",
+    "groq": "https://api.groq.com/openai/v1/chat/completions",
+    "cerebras": "https://api.cerebras.ai/v1/chat/completions",
+    "sambanova": "https://api.sambanova.ai/v1/chat/completions",
+    "openrouter": "https://openrouter.ai/api/v1/chat/completions",
+    "huggingface": "https://router.huggingface.co/v1/chat/completions",
+    "deepinfra": "https://api.deepinfra.com/v1/openai/chat/completions",
+    "fireworks": "https://api.fireworks.ai/inference/v1/chat/completions",
+    "mistral": "https://api.mistral.ai/v1/chat/completions",
+    "cohere": "https://api.cohere.ai/v1/chat/completions",
+    "ai21": "https://api.ai21.com/v1/chat/completions",
+    "together": "https://api.together.ai/v1/chat/completions",
+    "cloudflare": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/chat/completions",
+    "perplexity": "https://api.perplexity.ai/chat/completions",
+    "google": "https://generativelanguage.googleapis.com/v1beta/models/",
+    "ollama": "http://localhost:11434/v1/chat/completions",
+}
 
 
 def atomic_write_json(path, data):
@@ -34,118 +40,90 @@ def atomic_write_json(path, data):
     os.replace(temp_path, path)
 
 
-def get_fcm_data():
-    try:
-        temp_dir = tempfile.gettempdir()
-        temp_path = os.path.join(temp_dir, "frugality_models.json")
-
-        subprocess.run(
-            ["stdbuf", "-o0", "free-coding-models", "--json", "--hide-unconfigured"],
-            stdout=open(temp_path, "w"),
-            stderr=subprocess.PIPE,
-            timeout=120,
-        )
-
-        with open(temp_path, "r") as f:
-            content = f.read()
-
-        os.unlink(temp_path)
-
-        lines = content.split("\n")
-        json_lines = []
-        in_json = False
-        for line in lines:
-            if line.strip().startswith("["):
-                in_json = True
-            if in_json:
-                json_lines.append(line)
-                if line.strip() == "]":
-                    break
-
-        return json.loads("\n".join(json_lines))
-    except subprocess.TimeoutExpired:
-        print("Error: free-coding-models timed out")
-        return []
-    except (json.JSONDecodeError, IndexError) as e:
-        print(f"Error: Could not parse free-coding-models output: {e}")
-        return []
-    except Exception as e:
-        print(f"Error: {e}")
-        return []
-    except (json.JSONDecodeError, IndexError) as e:
-        print(f"Error: Could not parse free-coding-models output: {e}")
-        return []
-    except Exception as e:
-        print(f"Error: {e}")
-        return []
-    except (json.JSONDecodeError, IndexError) as e:
-        print(f"Error: Could not parse free-coding-models output: {e}")
-        return []
-    except Exception as e:
-        print(f"Error: {e}")
-        return []
-    try:
-        start_idx = output.find("[")
-        if start_idx == -1:
-            return []
-        json_str = output[start_idx:]
-        return json.loads(json_str)
-    except (json.JSONDecodeError, IndexError) as e:
-        print(f"Error: Could not parse free-coding-models output: {e}")
-        return []
-    try:
-        start_idx = output.find("[")
-        if start_idx == -1:
-            return []
-        json_str = output[start_idx:]
-        last_bracket = json_str.rfind("]")
-        if last_bracket != -1:
-            json_str = json_str[: last_bracket + 1]
-        return json.loads(json_str)
-    except (json.JSONDecodeError, IndexError) as e:
-        print(f"Error: Could not parse free-coding-models output: {e}")
-        return []
-    try:
-        lines = output.strip().split("\n")
-        json_start = 0
-        for i, line in enumerate(lines):
-            if line.strip().startswith("["):
-                json_start = i
-                break
-        json_output = "\n".join(lines[json_start:])
-        return json.loads(json_output)
-    except (json.JSONDecodeError, IndexError) as e:
-        print(f"Error: Could not parse free-coding-models output: {e}")
-        return []
-
-
 def get_fcm_credentials():
     if not os.path.exists(FCM_CONFIG_PATH):
-        print(f"Warning: {FCM_CONFIG_PATH} not found")
         return {}
-    with open(FCM_CONFIG_PATH, "r") as f:
-        return json.load(f)
+    try:
+        with open(FCM_CONFIG_PATH, "r") as f:
+            return json.load(f)
+    except:
+        return {}
+
+
+def get_fcm_data():
+    try:
+        result = subprocess.run(
+            [
+                "node",
+                "-e",
+                """
+const { execSync } = require('child_process');
+const output = execSync('free-coding-models --json --hide-unconfigured', {encoding: 'utf8', timeout: 30000});
+const startIdx = output.indexOf('[');
+if (startIdx === -1) { console.log('[]'); process.exit(0); }
+const jsonStr = output.slice(startIdx);
+const data = JSON.parse(jsonStr);
+console.log(JSON.stringify(data));
+""",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.stdout:
+            return json.loads(result.stdout.strip())
+        return []
+    except Exception as e:
+        print(f"Error getting fcm data: {e}")
+        return []
+
+
+def get_api_key(credentials, provider):
+    if not credentials:
+        return ""
+    api_keys = credentials.get("apiKeys", {})
+    key = api_keys.get(provider, "")
+    if key:
+        return key
+
+    for p in [provider, provider.upper(), provider.lower()]:
+        if p in api_keys:
+            return api_keys[p]
+
+    providers_config = credentials.get("providers", {})
+    if provider in providers_config:
+        return providers_config[provider].get("apiKey", "")
+
+    return ""
 
 
 def map_tiers(models):
     routes = {"default": None, "background": None, "think": None, "longContext": None}
 
-    tier_order = ["S+", "S", "A+", "A", "A-", "B+", "B", "C"]
-
     for m in models:
         model_id = m.get("modelId", "")
+        tier = m.get("tier", "C")
 
         if not routes["think"] and (
             "r1" in model_id.lower()
             or "v3" in model_id.lower()
             or "reasoning" in model_id.lower()
+            or "think" in model_id.lower()
         ):
             routes["think"] = m
-        if not routes["longContext"] and m.get("context_window", 0) >= 32000:
+
+        context = m.get("context", "0")
+        ctx_val = int(
+            context.replace("k", "000").replace("M", "000000").replace("1M", "1000000")
+            or "0"
+        )
+        if not routes["longContext"] and ctx_val >= 32000:
             routes["longContext"] = m
-        if not routes["default"] and m.get("tier") in ["S+", "S"]:
+
+        if not routes["default"] and tier in ["S+", "S"]:
             routes["default"] = m
-        if not routes["background"] and m.get("tier") in ["A+", "A"]:
+
+        if not routes["background"] and tier in ["A+", "A"]:
             routes["background"] = m
 
     for role in routes:
@@ -155,58 +133,72 @@ def map_tiers(models):
     return routes
 
 
-def update_configs():
-    print("--- Frugality: Discovering Best Free Models ---")
+def build_provider_config(models, credentials):
+    providers_map = {}
+
+    for m in models:
+        provider_key = m.get("provider", "")
+        if not provider_key:
+            continue
+
+        if provider_key not in providers_map:
+            base_url = PROVIDER_BASE_URLS.get(
+                provider_key, "https://api.openai.com/v1/chat/completions"
+            )
+            api_key = get_api_key(credentials, provider_key)
+
+            providers_map[provider_key] = {
+                "name": provider_key,
+                "api_base_url": base_url,
+                "api_key": api_key,
+                "models": [],
+            }
+
+        model_id = m.get("modelId", "")
+        if model_id:
+            providers_map[provider_key]["models"].append(model_id)
+
+    return list(providers_map.values())
+
+
+def update_ccr_config():
+    print("--- Frugality: Configuring Claude Code Router ---")
 
     credentials = get_fcm_credentials()
-    if credentials:
-        print(f"✓ Found credentials for: {', '.join(credentials.keys())}")
-    else:
-        print("⚠ No credentials found in ~/.free-coding-models.json")
-
     models = get_fcm_data()
+
     if not models:
         print("No models found. Check your Internet/API keys.")
-        return
+        return False
 
     print(f"✓ Discovered {len(models)} models")
 
     selected = map_tiers(models)
 
     if not selected["default"]:
-        print("Error: No suitable models found for default role")
-        return
+        print("Error: No suitable models found")
+        return False
 
-    ccr_config = {
-        "router": {
-            "default": selected["default"]["modelId"],
-            "background": selected["background"]["modelId"]
-            if selected["background"]
-            else selected["default"]["modelId"],
-            "think": selected["think"]["modelId"]
-            if selected["think"]
-            else selected["default"]["modelId"],
-            "longContext": selected["longContext"]["modelId"]
-            if selected["longContext"]
-            else selected["default"]["modelId"],
-        }
-    }
+    providers = build_provider_config(models, credentials)
 
-    os.makedirs(os.path.dirname(CCR_CONFIG_PATH), exist_ok=True)
+    router_config = {}
+    for role, model_data in selected.items():
+        if model_data:
+            model_id = model_data["modelId"]
+            provider = model_data.get("provider", "")
+            if provider:
+                router_config[role] = f"{provider},{model_id.split('/')[-1]}"
+            else:
+                router_config[role] = model_id.split("/")[-1]
+
+    ccr_config = {"Providers": providers, "Router": router_config}
+
     atomic_write_json(CCR_CONFIG_PATH, ccr_config)
     print(f"✓ Updated CCR config at {CCR_CONFIG_PATH}")
-
-    opencode_config = {
-        "models": [
-            {"id": m["modelId"], "tags": [m.get("tier", "unknown")]}
-            for m in selected.values()
-            if m
-        ]
-    }
-    atomic_write_json(OPENCODE_CONFIG_PATH, opencode_config)
-    print(f"✓ Updated {OPENCODE_CONFIG_PATH}")
-    print("--- Configuration Complete ---")
+    return True
 
 
 if __name__ == "__main__":
-    update_configs()
+    success = update_ccr_config()
+    if success:
+        print("--- Configuration Complete ---")
