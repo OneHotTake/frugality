@@ -1,0 +1,13 @@
+const fs = require('fs');
+const path = require('path');
+
+const modelState = {
+  "default": "route:code-fast",
+  "background": "route:code-fast",
+  "think": "route:code-accurate",
+  "longContext": "route:longctx-analysis",
+  "lastUpdated": "[TODAY]",
+  "note": "Actual bindings resolved by frugality bridge via CCR. Do not hardcode model names."
+};
+
+fs.writeFileSync('.ai/MODEL_STATE.json', JSON.stringify(modelState, null, 2));

@@ -1,0 +1,1 @@
+curl -fsSL https://raw.githubusercontent.com/[user]/frugality/main/scripts/install.sh | bash

@@ -1,0 +1,123 @@
+const path = require('path');
+const fs = require('fs');
+const { execSync } = require('child_process');
+
+const packageJson = {
+  "name": "frugality",
+  "version": "0.1.0",
+  "description": "Claude Code. Free models. Zero compromise.",
+  "bin": {
+    "frug": "./bin/frug.js"
+  },
+  "scripts": {
+    "test": "node --test packages/*/test/*.test.js",
+    "stress-test": "bash scripts/stress-test.sh",
+    "doctor": "node bin/frug.js doctor",
+    "start": "node bin/frug.js start",
+    "lint": "node --check packages/*/src/*.js bin/frug.js"
+  },
+  "keywords": ["claude-code", "ai", "free-tier", "routing", "orchestration"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {}
+};
+
+const packages = [
+  {
+    "name": "core",
+    "version": "0.1.0",
+    "description": "Frugality core package",
+    "main": "src/index.js",
+    "scripts": {
+      "test": "node --test test/*.test.js"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "MIT"
+  },
+  {
+    "name": "watchdog",
+    "version": "0.1.0",
+    "description": "Frugality watchdog package",
+    "main": "src/watchdog.js",
+    "scripts": {
+      "test": "node --test test/*.test.js"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "MIT"
+  },
+  {
+    "name": "cli",
+    "version": "0.1.0",
+    "description": "Frugality CLI package",
+    "main": "src/index.js",
+    "scripts": {
+      "test": "node --test test/*.test.js"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "MIT"
+  },
+  {
+    "name": "skill",
+    "version": "0.1.0",
+    "description": "Frugality skill package",
+    "main": "SKILL.md",
+    "scripts": {},
+    "keywords": [],
+    "author": "",
+    "license": "MIT"
+  }
+];
+
+const configDefaults = {
+  CCR_CONFIG: `${process.env.HOME}/.claude-code-router/config.json`,
+  CCR_PORT: 3456,
+  CCR_PRESETS_DIR: `${process.env.HOME}/.claude-code-router/presets`,
+  FCM_JSON: `${process.env.HOME}/.free-coding-models.json`,
+  LOG_DIR: `${process.env.HOME}/.frugality/logs`,
+  STATE_DIR: `${process.env.HOME}/.frugality/state`,
+  CACHE_DIR: `${process.env.HOME}/.frugality/cache`,
+  PID_WATCHDOG: `${process.env.HOME}/.frugality/watchdog.pid`,
+  PID_IDLE_WATCHER: `${process.env.HOME}/.frugality/idle-watcher.pid`,
+  PENDING_RESTART: `${process.env.HOME}/.frugality/state/pending-restart`,
+  PENDING_CONFIG: `${process.env.HOME}/.frugality/state/pending-config`,
+  MODEL_TIER: 'S',
+  MODEL_SORT: 'fiable',
+  WATCHDOG_INTERVAL_MS: 300000,
+  PROACTIVE_UPDATE_MS: 1800000,
+  PING_TIMEOUT_MS: 8000,
+  ACTIVE_REQUEST_TIMEOUT_S: 30,
+  IDLE_POLL_MS: 10000,
+  MAX_DEFER_WAIT_MS: 3600000,
+  MAX_CCR_RESTART_ATTEMPTS: 3,
+  LOG_MAX_SIZE_BYTES: 5 * 1024 * 1024,
+  CACHE_TTL_MS: 1800000,
+  VERSION: packageJson.version
+};
+
+// Create directories
+fs.mkdirSync('packages', { recursive: true });
+fs.mkdirSync('packages/core', { recursive: true });
+fs.mkdirSync('packages/watchdog', { recursive: true });
+fs.mkdirSync('packages/cli', { recursive: true });
+fs.mkdirSync('packages/skill', { recursive: true });
+fs.mkdirSync('config', { recursive: true });
+fs.mkdirSync('bin', { recursive: true });
+fs.mkdirSync('presets', { recursive: true });
+fs.mkdirSync('docs', { recursive: true });
+fs.mkdirSync('scripts', { recursive: true });
+fs.mkdirSync('.ai', { recursive: true });
+fs.mkdirSync('.prompts', { recursive: true });
+
+// Write package.json files
+fs.writeFileSync('package.json', JSON.stringify(packageJson, null, 2));
+packages.forEach((pkg) => {
+  fs.writeFileSync(`packages/${pkg.name}/package.json`, JSON.stringify(pkg, null, 2));
+});
+
+// Write config/defaults.js
+fs.writeFileSync('config/defaults.js', `module.exports = ${JSON.stringify(configDefaults, null, 2)};`);
