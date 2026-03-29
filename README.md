@@ -17,28 +17,39 @@ cd frugality
 
 ### For Claude Code (Recommended)
 
+**First time in a project:**
 ```bash
-frug-claude                    # Starts Claude Code in hybrid mode
-frug-claude --help             # Show Claude Code help
+cd /path/to/your/project
+frug init --hybrid              # Initialize hybrid mode (creates HYBRID.md)
 ```
+
+**Then use Claude Code normally:**
+```bash
+frug-claude                     # Starts Claude Code in hybrid mode with agents
+frug-claude --help              # Show Claude Code help
+```
+
+Or just use `claude` directly if you prefer—the agents are available whenever `HYBRID.md` exists in the project.
 
 ### For OpenCode
 
 ```bash
-frug-opencode                  # Starts OpenCode in hybrid mode
-frug-opencode --help           # Show OpenCode help
+cd /path/to/your/project
+frug init --opencode            # Initialize OpenCode mode (creates OPENCODE.md)
+frug-opencode                   # Starts OpenCode in hybrid mode
 ```
 
 ### Core Commands
 
 ```bash
-frug start --hybrid            # Hybrid mode (subscription main + free agents)
-frug start --agentic           # Fully free (all free-tier models)
-frug start --opencode          # OpenCode fully free
-frug status                    # Show system status
-frug stop                      # Stop all processes
-frug doctor                    # Diagnose and fix issues
-frug update                    # Refresh model cache
+frug init --hybrid              # Write HYBRID.md to current project (one time)
+frug start --hybrid             # Start hybrid mode system service
+frug status                     # Show system status
+frug start --agentic            # Fully free (all free-tier models)
+frug start --opencode           # OpenCode fully free
+frug stop                       # Stop all processes
+frug doctor                     # Diagnose and fix issues
+frug update                     # Refresh model cache
 ```
 
 ## Operating Modes
