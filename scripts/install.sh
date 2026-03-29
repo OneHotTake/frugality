@@ -87,27 +87,35 @@ mkdir -p ~/.frugality/cache
 mkdir -p ~/.frugality/logs
 echo "✓ Created ~/.frugality/"
 
-# Create bin symlinks or add to PATH
+# Create bin symlinks in ~/bin/
 echo ""
 echo "=========================================="
 echo "  Setting Up Command Wrappers"
 echo "=========================================="
 echo ""
 
-# Check if we can create symlinks (likely if /usr/local/bin is writable)
-if [ -w /usr/local/bin ] || [ "$EUID" = 0 ]; then
-    echo "Creating symlinks in /usr/local/bin..."
-    ln -sf "$PROJECT_DIR/bin/frugal-claude" /usr/local/bin/frugal-claude
-    ln -sf "$PROJECT_DIR/bin/frugal-opencode" /usr/local/bin/frugal-opencode
+# Create ~/bin/ if it doesn't exist
+mkdir -p "$HOME/bin"
+
+# Check if ~/bin is in PATH
+if [[ ":$PATH:" == *":$HOME/bin:"* ]]; then
+    echo "Creating symlinks in ~/bin..."
+    ln -sf "$PROJECT_DIR/bin/frugal-claude" "$HOME/bin/frugal-claude"
+    ln -sf "$PROJECT_DIR/bin/frugal-opencode" "$HOME/bin/frugal-opencode"
     echo "✓ Symlinks created"
     echo ""
     echo "Commands available: frugal-claude, frugal-opencode"
 else
-    echo "Cannot write to /usr/local/bin (permission denied)"
+    echo "Creating symlinks in ~/bin..."
+    ln -sf "$PROJECT_DIR/bin/frugal-claude" "$HOME/bin/frugal-claude"
+    ln -sf "$PROJECT_DIR/bin/frugal-opencode" "$HOME/bin/frugal-opencode"
+    echo "✓ Symlinks created in ~/bin/"
+    echo ""
+    echo "⚠ Warning: ~/bin is not in your PATH"
     echo ""
     echo "Add the following to your ~/.bashrc or ~/.zshrc:"
     echo ""
-    echo "  export PATH=\"\$PATH:$PROJECT_DIR/bin\""
+    echo "  export PATH=\"\$PATH:$HOME/bin\""
     echo ""
     echo "Then run: source ~/.bashrc (or ~/.zshrc)"
 fi

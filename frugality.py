@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
+import argparse
 import json
+import logging
 import os
 import subprocess
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 
 HOME = str(Path.home())
 FCM_CONFIG_PATH = os.path.join(HOME, ".free-coding-models.json")
 CCR_CONFIG_PATH = os.path.join(HOME, ".claude-code-router", "config.json")
+CACHE_DIR = os.path.join(HOME, ".frugality", "cache")
+CACHE_FILE = os.path.join(CACHE_DIR, "last-known-good.json")
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 PROVIDER_BASE_URLS = {
     "nvidia": "https://integrate.api.nvidia.com/v1/chat/completions",
@@ -29,17 +37,22 @@ PROVIDER_BASE_URLS = {
 }
 
 
+def setup_logging(verbose, quiet):
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+    elif quiet:
+        logger.setLevel(logging.WARNING)
+
+
 def backup_file(path):
     if not os.path.exists(path):
         return
-    from datetime import datetime
-
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = f"{path}.backup_{timestamp}"
     import shutil
 
     shutil.copy2(path, backup_path)
-    print(f"  Backed up existing config to {backup_path}")
+    logger.info(f"Backed up existing config to {backup_path}")
 
 
 def atomic_write_json(path, data):
@@ -61,12 +74,41 @@ def get_fcm_credentials():
     try:
         with open(FCM_CONFIG_PATH, "r") as f:
             return json.load(f)
-    except:
+    except Exception:
         return {}
+
+
+def load_cache():
+    if not os.path.exists(CACHE_FILE):
+        return None
+    try:
+        with open(CACHE_FILE, "r") as f:
+            data = json.load(f)
+        cached_at = datetime.fromisoformat(data.get("cached_at", "2000-01-01T00:00:00"))
+        cache_age = datetime.now() - cached_at
+        if cache_age < timedelta(hours=24):
+            logger.info(f"Using cached config from {cached_at.isoformat()}")
+            return data.get("models", [])
+        else:
+            logger.warning("Cache is stale (>24 hours)")
+            return None
+    except Exception:
+        return None
+
+
+def save_cache(models):
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    data = {"cached_at": datetime.now().isoformat(), "models": models}
+    try:
+        atomic_write_json(CACHE_FILE, data)
+        logger.debug(f"Saved {len(models)} models to cache")
+    except Exception as e:
+        logger.warning(f"Failed to save cache: {e}")
 
 
 def get_fcm_data():
     try:
+        logger.debug("Running free-coding-models discovery")
         result = subprocess.run(
             [
                 "node",
@@ -85,12 +127,57 @@ console.log(JSON.stringify(data));
             text=True,
             timeout=60,
         )
-        if result.stdout:
-            return json.loads(result.stdout.strip())
-        return []
+        if result.returncode != 0:
+            logger.debug(f"FCM stderr: {result.stderr}")
+            raise Exception(f"FCM exited with code {result.returncode}")
+
+        if not result.stdout:
+            raise Exception("FCM returned empty output")
+
+        data = json.loads(result.stdout.strip())
+        logger.debug(f"FCM returned {len(data)} models")
+
+        if not isinstance(data, list) or len(data) == 0:
+            raise Exception("FCM output is not a non-empty JSON array")
+
+        first = data[0]
+        if "modelId" not in first or "tier" not in first:
+            missing = []
+            if "modelId" not in first:
+                missing.append("modelId")
+            if "tier" not in first:
+                missing.append("tier")
+            logger.warning(
+                f"FCM output schema has changed — missing fields: {missing}. Update frugality.py tier mapping to match new schema."
+            )
+            raise Exception("FCM output missing required fields")
+
+        save_cache(data)
+        return data
+
+    except json.JSONDecodeError as e:
+        logger.debug(f"JSON decode error: {e}")
+        raise Exception(f"Invalid JSON from FCM: {e}")
     except Exception as e:
-        print(f"Error getting fcm data: {e}")
-        return []
+        logger.debug(f"FCM error: {e}")
+        raise e
+
+
+def get_fcm_data_with_cache():
+    try:
+        return get_fcm_data()
+    except Exception as e:
+        logger.warning(f"FCM discovery failed: {e}. Attempting cache fallback.")
+        cached = load_cache()
+        if cached:
+            logger.info(f"Using cached config from cache file")
+            return cached
+        else:
+            logger.error("No valid cache available. Please check:")
+            logger.error("  - Internet connection")
+            logger.error("  - API keys configured in ~/.free-coding-models.json")
+            logger.error("  - Run 'free-coding-models --json' manually to test")
+            return None
 
 
 def get_api_key(credentials, provider):
@@ -176,23 +263,37 @@ def build_provider_config(models, credentials):
     return list(providers_map.values())
 
 
+def print_selection_summary(selected):
+    logger.info("Frugality model selection:")
+    for role in ["default", "background", "think", "longContext"]:
+        model_data = selected.get(role)
+        if model_data:
+            model_id = model_data.get("modelId", "unknown")
+            tier = model_data.get("tier", "unknown")
+            uptime = model_data.get("uptime", "unknown")
+            logger.info(f"  {role:12} → {model_id} ({tier}-tier, {uptime}% uptime)")
+        else:
+            logger.info(f"  {role:12} → (none selected)")
+
+
 def update_ccr_config():
-    print("--- Frugality: Configuring Claude Code Router ---")
+    logger.info("Configuring Claude Code Router")
 
     credentials = get_fcm_credentials()
-    models = get_fcm_data()
+    models = get_fcm_data_with_cache()
 
     if not models:
-        print("No models found. Check your Internet/API keys.")
         return False
 
-    print(f"✓ Discovered {len(models)} models")
+    logger.info(f"Discovered {len(models)} models")
 
     selected = map_tiers(models)
 
     if not selected["default"]:
-        print("Error: No suitable models found")
+        logger.error("No suitable models found")
         return False
+
+    print_selection_summary(selected)
 
     providers = build_provider_config(models, credentials)
 
@@ -208,12 +309,31 @@ def update_ccr_config():
 
     ccr_config = {"Providers": providers, "Router": router_config}
 
-    atomic_write_json(CCR_CONFIG_PATH, ccr_config)
-    print(f"✓ Updated CCR config at {CCR_CONFIG_PATH}")
+    try:
+        atomic_write_json(CCR_CONFIG_PATH, ccr_config)
+        logger.info(f"Updated CCR config at {CCR_CONFIG_PATH}")
+    except Exception as e:
+        logger.error(f"Failed to write config: {e}")
+        return False
+
     return True
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Frugality - Cost-optimized AI model routing"
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Enable debug output"
+    )
+    parser.add_argument("-q", "--quiet", action="store_true", help="Only show errors")
+    args = parser.parse_args()
+
+    setup_logging(args.verbose, args.quiet)
+
     success = update_ccr_config()
     if success:
-        print("--- Configuration Complete ---")
+        logger.info("Configuration complete")
+        exit(0)
+    else:
+        exit(1)

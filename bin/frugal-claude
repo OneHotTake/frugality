@@ -1,6 +1,71 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+# Verify python3 is available
+if ! command -v python3 &> /dev/null; then
+    echo "Error: python3 is required but not installed."
+    echo "Please install Python 3 and try again."
+    exit 1
+fi
+
+# Resolve frugality.py path relative to this script's location
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR/.."
-python3 frugality.py
-ccr restart
-claude "$@"
+FRUGALITY_PY="$SCRIPT_DIR/../frugality.py"
+
+# Verify frugality.py exists
+if [ ! -f "$FRUGALITY_PY" ]; then
+    echo "Error: frugality.py not found at $FRUGALITY_PY"
+    echo "Please ensure Frugality is installed correctly."
+    exit 1
+fi
+
+# Run frugality.py
+echo "Running Frugality configuration..."
+python3 "$FRUGALITY_PY"
+FRUGALITY_EXIT=$?
+
+if [ $FRUGALITY_EXIT -ne 0 ]; then
+    echo "Error: Frugality configuration failed."
+    exit $FRUGALITY_EXIT
+fi
+
+# Check if CCR is running and restart if needed
+if command -v ccr &> /dev/null; then
+    CCR_STATUS=$(ccr status 2>/dev/null)
+    
+    if echo "$CCR_STATUS" | grep -q "running\|started"; then
+        echo "Restarting CCR with new model config..."
+        ccr restart &
+        RESTART_PID=$!
+        
+        # Wait up to 15 seconds for CCR to come back
+        for i in {1..8}; do
+            sleep 2
+            if curl -s http://localhost:3456 > /dev/null 2>&1; then
+                echo "CCR restarted with new model config."
+                break
+            fi
+            if [ $i -eq 8 ]; then
+                echo "Warning: CCR restart timed out. Config updated but routing may use old models until CCR recovers."
+            fi
+        done
+    else
+        echo "Starting CCR..."
+        ccr start &
+        RESTART_PID=$!
+        
+        # Wait up to 10 seconds for CCR to start
+        for i in {1..5}; do
+            sleep 2
+            if curl -s http://localhost:3456 > /dev/null 2>&1; then
+                echo "CCR started successfully."
+                break
+            fi
+            if [ $i -eq 5 ]; then
+                echo "Warning: CCR failed to start. You may need to start it manually."
+            fi
+        done
+    fi
+fi
+
+# Launch Claude Code
+exec claude "$@"
