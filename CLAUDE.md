@@ -1,53 +1,65 @@
 # Frugality — Cost-Optimized AI Development
 
-Frugality is an open-source project that orchestrates free-tier AI models for Claude Code. It provides a cost-effective solution for AI-assisted development, allowing developers to focus on high-level decisions while delegating boilerplate code, tests, and documentation to AI models.
+Frugality is a lightweight orchestration tool that automatically discovers and configures the best free-tier AI models for Claude Code and OpenCode.
 
-## Architecture
+## Simplified Architecture
 
-Frugality consists of several components:
+Frugality has been refactored to a minimal, high-utility structure:
 
-* `packages/core`: The core logic of Frugality, responsible for model selection, caching, and routing.
-* `packages/watchdog`: A health monitor that triggers bridge updates when models degrade.
-* `packages/cli`: The command-line interface for Frugality, providing commands for starting, stopping, and updating the system.
-* `packages/skill`: The skill document for Frugality, defining the delegation rules and guidelines for AI-assisted development.
+```
+frugality/
+├── bin/
+│   ├── frugal-claude       # Wrapper: update CCR + launch Claude
+│   └── frugal-opencode    # Wrapper: update OpenCode + launch OpenCode
+├── .frugality/
+│   ├── cache/             # Model discovery cache
+│   └── logs/             # Operation logs
+├── scripts/
+│   ├── install.sh        # Installation script
+│   └── completions/      # Shell completions
+├── frugality.py          # Main orchestration script (Python)
+└── README.md             # Documentation
+```
 
-## Development Commands
+## How It Works
 
-* `npm run test`: Run unit tests for all packages.
-* `npm run stress-test`: Run stress tests for the entire system.
-* `npm run doctor`: Run the doctor command to diagnose and fix issues.
-* `npm run start`: Start the Frugality system.
-* `npm run update`: Update the Frugality system to the latest version.
+1. **Discovery**: `frugality.py` runs `free-coding-models --json` to discover available models
+2. **Tier Mapping**: Maps models to routing tiers (default, background, think, longContext)
+3. **Config Generation**: Generates CCR config with Providers + Router
+4. **Atomic Write**: Uses temp file + rename for safe JSON updates
 
-## AI Orchestration
+## Commands
 
-Frugality uses Claude Code to orchestrate AI models. The `packages/skill/SKILL.md` file defines the delegation rules and guidelines for AI-assisted development.
+| Command | Description |
+|---------|-------------|
+| `frugal-claude` | Update CCR config + launch Claude Code |
+| `frugal-opencode` | Configure OpenCode + launch OpenCode |
+| `python3 frugality.py` | Run config update only |
 
-## Route Class Delegation Table
+## Configuration Files
 
-| Route Class | Delegate | Keep |
-| --- | --- | --- |
-| Tests | | |
-| Documentation | | |
-| Boilerplate | | |
-| Analysis | | |
-| Reasoning | | |
+- **CCR Config**: `~/.claude-code-router/config.json`
+- **OpenCode Config**: `~/.config/opencode/opencode.json` (managed by free-coding-models)
+- **API Keys**: `~/.free-coding-models.json`
 
-## State Files
+## Model Tier Reference
 
-Frugality uses several state files to manage its state:
+| Tier | SWE Score | Use Case |
+|------|-----------|----------|
+| S+ | ≥70% | Complex refactors, GitHub issues |
+| S | 60-70% | General workhorse |
+| A+/A | 40-60% | Secondary tasks |
+| B+ | 30-40% | Small changes |
 
-* `.ai/CURRENT_TASK.md`: The current task being worked on.
-* `.ai/REPO_MAP.md`: The repository structure.
-* `.ai/SESSION_SUMMARY.md`: A summary of completed work.
-* `.ai/FAILURES.ndjson`: A log of sub-agent failures.
-* `.ai/MODEL_STATE.json`: The current routing configuration.
+## Development
 
-## Session Startup Checklist
+```bash
+# Test configuration
+python3 frugality.py
 
-1. Read `CLAUDE.md`.
-2. Read `.ai/CURRENT_TASK.md`.
-3. Read `.ai/REPO_MAP.md`.
-4. Check `.ai/FAILURES.ndjson` for unresolved blockers.
-5. Inspect `.ai/MODEL_STATE.json` for current routes.
-6. Begin work — delegate immediately when task type qualifies.
+# Check CCR status
+ccr status
+
+# View logs
+tail -f ~/.claude-code-router/logs/ccr-*.log
+```
