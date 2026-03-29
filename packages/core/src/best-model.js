@@ -172,15 +172,33 @@ const bestModel = {
     ensureCacheDir();
     const cacheFile = path.join(defaults.CACHE_DIR, 'model-cache.json');
     
-    const tasks = ['default', 'reasoning', 'analysis'];
+    const taskModelMap = {
+      'default': 'default',
+      'fast': 'default',
+      'analysis': 'reasoning',
+      'reasoning': 'reasoning',
+      'best-model-default': 'default',
+      'best-model-fast': 'default',
+      'best-model-analysis': 'reasoning',
+      'best-model-reasoning': 'reasoning'
+    };
+    
+    const tasks = ['default', 'fast', 'analysis', 'reasoning'];
     
     for (const task of tasks) {
       const selected = bestModel.selectByTaskType(models);
       if (selected) {
         const providerKey = bestModel.extractProviderKey(selected.id, defaults.FCM_JSON);
         bestModel.writeCache(task, selected.id, providerKey);
+        
+        const modelCacheFile = path.join(defaults.CACHE_DIR, `best-model-${task}.txt`);
+        fs.writeFileSync(modelCacheFile, selected.id);
       }
     }
+    
+    const defaultModel = models[0] ? models[0].id : 'claude-3-haiku';
+    fs.writeFileSync(path.join(defaults.CACHE_DIR, 'best-model-default.txt'), defaultModel);
+    fs.writeFileSync(path.join(defaults.CACHE_DIR, 'best-model-fallback.txt'), 'zen@grok-code');
     
     return { refreshed: true, modelCount: models.length };
   },

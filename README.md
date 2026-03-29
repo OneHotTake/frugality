@@ -38,8 +38,11 @@ node bin/frug.js doctor
 ## Quick Start
 
 ```bash
-# Start the Frugality system
+# Start the Frugality system (proxy mode)
 node bin/frug.js start
+
+# OR start in agentic mode (Claude as primary router)
+node bin/frug.js start --agentic
 
 # Check status
 node bin/frug.js status
@@ -48,14 +51,32 @@ node bin/frug.js status
 node bin/frug.js stop
 ```
 
+## Operating Modes
+
+### Proxy Mode (Default)
+CCR acts as the persistent routing daemon. Sub-agents use claudish. Rock-solid, transparent routing with minimal configuration.
+
+### Agentic Mode (Recommended)
+Claude Code becomes the intelligent orchestrator. You decide which model to use for each task based on:
+- Task type (boilerplate, tests, docs, analysis, reasoning)
+- Token count
+- Latency requirements
+
+Claude reads the model cache and spawns sub-agents with the optimal model.
+
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `start` | Start the Frugality system (watchdog + idle watcher) |
+| `start` | Start in proxy mode (CCR as router) |
+| `start --agentic` | Start in agentic mode (Claude as router) |
+| `agent status` | Show agentic mode status |
+| `agent models` | List cached models |
+| `agent refresh` | Refresh model cache |
 | `stop` | Stop the Frugality system |
 | `status` | Show system status and health |
 | `update` | Update model configurations |
+| `update --agentic` | Update agentic mode cache |
 | `doctor` | Diagnose and fix system issues |
 | `version` | Show version information |
 | `help` | Show help message |
