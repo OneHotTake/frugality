@@ -8,7 +8,7 @@ const defaults = {
 };
 
 const defaultConfig = {
-  version: '0.2.0',
+  version: '0.3.0',
   mode: 'agentic',
   autoStart: false,
   notifications: true,
@@ -34,6 +34,17 @@ const defaultConfig = {
       reasoning: 'or@deepseek/deepseek-v3.2'
     }
   },
+  // Hybrid mode: main orchestrator uses subscription; agents use free cache models
+  hybrid: {
+    enabled: false,
+    mainModel: 'claude-sonnet-4-6',
+    agentModels: {
+      fast: null,      // null → read from ~/.frugality/cache/best-model-fast.txt
+      analysis: null,  // null → read from ~/.frugality/cache/best-model-analysis.txt
+      reasoning: null  // null → read from ~/.frugality/cache/best-model-reasoning.txt
+    },
+    writeTemplate: true
+  },
   logging: {
     level: 'info',
     maxSizeBytes: 5242880
@@ -43,19 +54,21 @@ const defaultConfig = {
 const config = {
   load: () => {
     const configPath = path.join(defaults.CONFIG_DIR, defaults.CONFIG_FILE);
-    
+
     if (!fs.existsSync(defaults.CONFIG_DIR)) {
       fs.mkdirSync(defaults.CONFIG_DIR, { recursive: true });
     }
-    
+
     if (!fs.existsSync(configPath)) {
       fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
       return { ...defaultConfig, _path: configPath, _isDefault: true };
     }
-    
+
     try {
       const loaded = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      return { ...defaultConfig, ...loaded, _path: configPath, _isDefault: false };
+      // Deep-merge to pick up new defaultConfig keys added in later versions
+      const merged = config._deepMerge(defaultConfig, loaded);
+      return { ...merged, _path: configPath, _isDefault: false };
     } catch (e) {
       return { ...defaultConfig, _path: configPath, _isDefault: true, _error: e.message };
     }
@@ -63,16 +76,16 @@ const config = {
 
   save: (configData) => {
     const configPath = path.join(defaults.CONFIG_DIR, defaults.CONFIG_FILE);
-    
+
     if (!fs.existsSync(defaults.CONFIG_DIR)) {
       fs.mkdirSync(defaults.CONFIG_DIR, { recursive: true });
     }
-    
+
     const toSave = { ...configData };
     delete toSave._path;
     delete toSave._isDefault;
     delete toSave._error;
-    
+
     fs.writeFileSync(configPath, JSON.stringify(toSave, null, 2));
     return { saved: true, path: configPath };
   },
@@ -80,7 +93,7 @@ const config = {
   get: (key) => {
     const cfg = config.load();
     if (!key) return cfg;
-    
+
     const keys = key.split('.');
     let value = cfg;
     for (const k of keys) {
@@ -92,7 +105,7 @@ const config = {
   set: (key, value) => {
     const cfg = config.load();
     const keys = key.split('.');
-    
+
     let current = cfg;
     for (let i = 0; i < keys.length - 1; i++) {
       if (!current[keys[i]]) {
@@ -101,7 +114,7 @@ const config = {
       current = current[keys[i]];
     }
     current[keys[keys.length - 1]] = value;
-    
+
     return config.save(cfg);
   },
 
@@ -125,6 +138,26 @@ const config = {
       _initTime: new Date().toISOString()
     };
     return config.save(cfg);
+  },
+
+  // Shallow-first deep merge: defaults are the base; loaded values override.
+  // Ensures new top-level keys added to defaultConfig are always present.
+  _deepMerge: (base, override) => {
+    const result = { ...base };
+    for (const key of Object.keys(override)) {
+      if (
+        override[key] !== null &&
+        typeof override[key] === 'object' &&
+        !Array.isArray(override[key]) &&
+        typeof base[key] === 'object' &&
+        base[key] !== null
+      ) {
+        result[key] = config._deepMerge(base[key], override[key]);
+      } else {
+        result[key] = override[key];
+      }
+    }
+    return result;
   }
 };
 

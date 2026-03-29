@@ -1,6 +1,6 @@
 # Frugality — Cost-Optimized AI Development
 
-Frugality is an open-source project that orchestrates free-tier AI models for Claude Code. It provides a cost-effective solution for AI-assisted development, allowing developers to focus on high-level decisions while delegating boilerplate code, tests, and documentation to AI models.
+Frugality is an open-source project that orchestrates free-tier AI models for Claude Code or OpenCode. It provides a cost-effective solution for AI-assisted development.
 
 ## Architecture
 
@@ -10,6 +10,15 @@ Frugality consists of several components:
 * `packages/watchdog`: A health monitor that triggers bridge updates when models degrade.
 * `packages/cli`: The command-line interface for Frugality, providing commands for starting, stopping, and updating the system.
 * `packages/skill`: The skill document for Frugality, defining the delegation rules and guidelines for AI-assisted development.
+
+## This Branch: OpenCode Integration
+
+This branch (`opencode`) is specifically designed for OpenCode. Unlike the main branch which uses CCR and claudish, this branch:
+
+- Works with OpenCode's native agent spawning system
+- Does not require Claude Code Router (CCR)
+- Does not require claudish
+- Routes agents to cost-effective free-tier models
 
 ## Development Commands
 
@@ -21,17 +30,9 @@ Frugality consists of several components:
 
 ## AI Orchestration
 
-Frugality uses Claude Code to orchestrate AI models. The `packages/skill/SKILL.md` file defines the delegation rules and guidelines for AI-assisted development.
+For OpenCode, Frugality optimizes agent spawning. When OpenCode spawns an agent to help with coding tasks, Frugality ensures the agent uses the best available free-tier model.
 
-## Route Class Delegation Table
-
-| Route Class | Delegate | Keep |
-| --- | --- | --- |
-| Tests | | |
-| Documentation | | |
-| Boilerplate | | |
-| Analysis | | |
-| Reasoning | | |
+The `packages/skill/SKILL.md` file defines the delegation rules and guidelines for AI-assisted development.
 
 ## State Files
 

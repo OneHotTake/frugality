@@ -129,7 +129,7 @@ const watchdog = {
     
     if (!processCheck.running) {
       lastHealthCheck = { healthy: false, error: processCheck.reason, timestamp: Date.now() };
-      return { status: ' CCR not running', reason: processCheck.reason };
+      return { status: 'CCR not running', reason: processCheck.reason };
     }
     
     const health = await watchdog.pingCurrentModel();

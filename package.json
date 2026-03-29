@@ -1,6 +1,6 @@
 {
   "name": "frugality",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Claude Code. Free models. Zero compromise.",
   "bin": {
     "frug": "./bin/frug.js"
