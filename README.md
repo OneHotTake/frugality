@@ -66,6 +66,16 @@ sudo ln -s /path/to/frugality/bin/frugal-opencode /usr/local/bin/
 
 ### 3. Configure API Keys
 
+**Option A: Automatic (Recommended)**
+
+Run free-coding-models for the first time - it will prompt you to enter API keys for any providers you want to use. Keys are saved automatically to `~/.free-coding-models.json`:
+
+```bash
+free-coding-models
+```
+
+**Option B: Manual**
+
 Create `~/.free-coding-models.json` with your API keys:
 
 ```json
@@ -77,6 +87,8 @@ Create `~/.free-coding-models.json` with your API keys:
   }
 }
 ```
+
+> **Tip:** free-coding-models supports many providers. Run `free-coding-models --help` to see all available options.
 
 ## Quick Start
 
