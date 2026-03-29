@@ -142,14 +142,20 @@ Execute this EVERY session start:
 ### For OpenCode Integration
 
 ```bash
-# Start Frugality for OpenCode (run once at session start)
+# Fully-free mode (all agents use free models)
 frug start --opencode
+
+# Hybrid mode (you use subscription; agents use free models)
+frug start --opencode --hybrid
+
+# Write HYBRID.md to current project
+frug init --hybrid
 
 # Check status
 frug opencode status
 
 # Refresh model cache
-frug opencode refresh
+frug update
 
 # List available models
 frug opencode models
@@ -163,18 +169,33 @@ frug stop
 
 ---
 
+## Operating Modes
+
+### Fully-Free Mode (`frug start --opencode`)
+All agents — including you — use free-tier models exclusively. Zero cost.
+
+### Hybrid Mode (`frug start --opencode --hybrid`)
+- **You** (the main session) use your Anthropic subscription for thinking and orchestrating.
+- **Sub-agents** you spawn use the best available free-tier models.
+- Run `frug init --hybrid` to write `HYBRID.md` to your project root with routing rules.
+
+Read `HYBRID.md` at session start when in hybrid mode.
+
+---
+
 ## Free Models Resource
 
 Always use: **https://github.com/anthropics/free-coding-models**
 
-This repository contains the latest free-tier models. Frugality automatically queries and caches these models for you.
+Frugality automatically queries and caches these models.
 
 ---
 
 ## Key Principles
 
 1. **Every token on boilerplate is wasted** — delegate tests, docs, scaffolding
-2. **Never use paid models** — free-coding-models has everything you need
-3. **Cache is king** — always read from ~/.frugality/cache/ first
-4. **Delegate aggressively** — use Task tool for any qualifying task
-5. **Keep context lean** — write detailed outputs to state files, not chat
+2. **In fully-free mode, never use paid models** — free-coding-models has everything
+3. **In hybrid mode, you think; agents execute** — use your subscription for reasoning only
+4. **Cache is king** — always read from `~/.frugality/cache/` first
+5. **Delegate aggressively** — use Task tool for any qualifying task
+6. **Keep context lean** — write detailed outputs to state files, not chat

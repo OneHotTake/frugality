@@ -1,6 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 
 const defaults = {
   CCR_PRESETS_DIR: path.join(process.env.HOME || '/home/user', '.claude-code-router/presets'),
@@ -17,7 +16,7 @@ const bridge = {
     if (!providerKeyName) {
       throw new Error('providerKeyName is required');
     }
-    
+
     return {
       modelId,
       providerKeyName,
@@ -30,8 +29,8 @@ const bridge = {
     if (!Array.isArray(models)) {
       throw new Error('models must be an array');
     }
-    
-    const manifest = {
+
+    return {
       version: '1.0',
       models: models.map(m => ({
         id: m.id || m.modelId,
@@ -43,10 +42,12 @@ const bridge = {
       })),
       createdAt: new Date().toISOString()
     };
-    
-    return manifest;
   },
 
+  // Write a manifest to disk.
+  // When staging=true the file goes to a sibling ".staging-<presetName>" dir so
+  // that promoteStaged can atomically swap it into place without the staging dir
+  // moving underneath us during the rename.
   writeManifest: (manifest, presetName, staging = false) => {
     if (!manifest) {
       throw new Error('manifest is required');
@@ -54,50 +55,55 @@ const bridge = {
     if (!presetName) {
       throw new Error('presetName is required');
     }
-    
+
     const presetsDir = defaults.CCR_PRESETS_DIR;
-    
+
     if (!fs.existsSync(presetsDir)) {
       fs.mkdirSync(presetsDir, { recursive: true });
     }
-    
-    const targetDir = staging 
-      ? path.join(presetsDir, presetName, 'staging')
+
+    const targetDir = staging
+      ? path.join(presetsDir, `.staging-${presetName}`)
       : path.join(presetsDir, presetName);
-    
+
     fs.mkdirSync(targetDir, { recursive: true });
-    
+
     const manifestPath = path.join(targetDir, 'manifest.json');
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-    
+
     return manifestPath;
   },
 
+  // Promote a staged preset to active.
+  // Staging dir: <presetsDir>/.staging-<presetName>  (sibling, not child)
+  // Active dir:  <presetsDir>/<presetName>
+  // This avoids the bug where renaming the active dir moves the staging subdir with it.
   promoteStaged: (presetName) => {
     if (!presetName) {
       throw new Error('presetName is required');
     }
-    
+
     const presetsDir = defaults.CCR_PRESETS_DIR;
-    const stagingDir = path.join(presetsDir, presetName, 'staging');
-    const activeDir = path.join(presetsDir, presetName);
-    
+    const stagingDir = path.join(presetsDir, `.staging-${presetName}`);
+    const activeDir  = path.join(presetsDir, presetName);
+
     if (!fs.existsSync(stagingDir)) {
       throw new Error(`Staging directory does not exist: ${stagingDir}`);
     }
-    
+
     const stagedManifest = path.join(stagingDir, 'manifest.json');
     if (!fs.existsSync(stagedManifest)) {
       throw new Error('Staged manifest not found');
     }
-    
+
+    // Backup existing active preset before promoting
     if (fs.existsSync(activeDir)) {
-      const backupDir = path.join(presetsDir, presetName, `backup-${Date.now()}`);
+      const backupDir = path.join(presetsDir, `.backup-${presetName}-${Date.now()}`);
       fs.renameSync(activeDir, backupDir);
     }
-    
+
     fs.renameSync(stagingDir, activeDir);
-    
+
     return activeDir;
   },
 
@@ -105,14 +111,14 @@ const bridge = {
     if (!presetName) {
       throw new Error('presetName is required');
     }
-    
+
     const presetsDir = defaults.CCR_PRESETS_DIR;
     const presetPath = path.join(presetsDir, presetName);
-    
+
     if (!fs.existsSync(presetPath)) {
       fs.mkdirSync(presetPath, { recursive: true });
     }
-    
+
     const manifestPath = path.join(presetPath, 'manifest.json');
     if (!fs.existsSync(manifestPath)) {
       const defaultManifest = {
@@ -122,7 +128,7 @@ const bridge = {
       };
       fs.writeFileSync(manifestPath, JSON.stringify(defaultManifest, null, 2));
     }
-    
+
     return presetPath;
   },
 
@@ -131,33 +137,25 @@ const bridge = {
     const presetName = options.preset || 'default';
     const models = options.models || [];
     const staging = options.staging || false;
-    
+
     const manifest = bridge.buildManifest(models);
     const manifestPath = bridge.writeManifest(manifest, presetName, staging);
-    
-    if (staging) {
-      return {
-        status: 'staged',
-        manifestPath,
-        presetName
-      };
-    }
-    
+
     return {
-      status: 'active',
+      status: staging ? 'staged' : 'active',
       manifestPath,
       presetName
     };
   },
 
   getPresetsDir: () => defaults.CCR_PRESETS_DIR,
-  
+
   setPresetsDir: (dir) => {
     defaults.CCR_PRESETS_DIR = dir;
   },
-  
+
   getConfigPath: () => defaults.CCR_CONFIG,
-  
+
   setConfigPath: (configPath) => {
     defaults.CCR_CONFIG = configPath;
   }

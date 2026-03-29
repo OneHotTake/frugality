@@ -416,4 +416,81 @@ Runs a CLI command.
 ```javascript
 const result = await frug.run(['status']);
 console.log(result);
+
+// Start hybrid mode
+const r = await frug.run(['start', '--hybrid']);
+// { success: true, mode: 'hybrid', mainModel: 'claude-sonnet-4-6', ... }
 ```
+
+---
+
+### hybrid
+
+Hybrid mode support — subscription orchestrator + free-model agents.
+
+```javascript
+const hybrid = require('packages/core/src/hybrid');
+```
+
+#### getMainModel()
+
+Returns the model for the main orchestrator. Reads `FRUGALITY_MAIN_MODEL` env var, falls back to `claude-sonnet-4-6`.
+
+**Returns:** `string`
+
+#### getAgentModel(taskType)
+
+Returns the best free model for the given task type by reading `~/.frugality/cache/best-model-<taskType>.txt`. Falls back to the default cache file, then to hardcoded defaults.
+
+**Parameters:**
+- `taskType` (string): `'fast'` | `'analysis'` | `'reasoning'` | `'default'`
+
+**Returns:** `string` — model identifier
+
+**Example:**
+```javascript
+const fastModel = hybrid.getAgentModel('fast');
+// 'claude-3-haiku'  (or whatever is in the cache)
+```
+
+#### buildHybridConfig()
+
+Builds a complete hybrid config object showing main and agent models plus the task routing table.
+
+**Returns:** Object with `mode`, `main`, `agents`, `taskRouting`
+
+#### writeHybridState(opts)
+
+Persists hybrid mode config to `~/.frugality/state/hybrid-mode`.
+
+**Parameters:**
+- `opts.version` (string, optional): Version string to embed
+
+**Returns:** The state object written
+
+#### readHybridState()
+
+Reads the current hybrid state file.
+
+**Returns:** State object or `null` if not in hybrid mode
+
+#### clearHybridState()
+
+Deletes the hybrid-mode state file.
+
+#### isHybridMode()
+
+**Returns:** `boolean` — true if the hybrid-mode state file exists
+
+#### writeTemplate(targetPath)
+
+Writes a populated `HYBRID.md` document to `targetPath`.
+
+**Parameters:**
+- `targetPath` (string): Absolute path to write to
+
+**Returns:** `targetPath`
+
+#### setCacheDir(dir) / setStateDir(dir)
+
+Override cache/state directories (for testing).

@@ -15,11 +15,20 @@ Frugality orchestrates free-tier AI models for AI-assisted development. It autom
 - **Caching**: Reduces API calls by caching model selections
 - **CLI Interface**: Simple command-line interface for all operations
 
+## Operating Modes
+
+| Mode | Flag | Main Model | Agents | Best For |
+|------|------|-----------|--------|----------|
+| **Fully Free** | `--agentic` | Free | Free | Maximum cost savings |
+| **OpenCode Free** | `--opencode` | Free | Free | OpenCode users, zero cost |
+| **Hybrid** | `--hybrid` | Anthropic subscription | Free | Best reasoning + free agents |
+| **OpenCode Hybrid** | `--opencode --hybrid` | Anthropic subscription | Free | OpenCode with smart main model |
+
 ## Choose Your Integration
 
 | Integration | Best For | Requirements |
 |------------|----------|--------------|
-| **Claude Code** | Direct Claude CLI usage with CCR routing | CCR (Claude Code Router), claudish |
+| **Claude Code** | Direct Claude CLI usage | Optional: CCR for proxy mode |
 | **OpenCode** | Spawning AI agents for coding tasks | OpenCode CLI, native agent system |
 
 ---
@@ -51,8 +60,14 @@ node bin/frug.js doctor
 ### Quick Start
 
 ```bash
-# Start the Frugality system for OpenCode
-node bin/frug.js start
+# Fully-free mode for OpenCode
+node bin/frug.js start --opencode
+
+# Hybrid mode for OpenCode (subscription + free agents)
+node bin/frug.js start --opencode --hybrid
+
+# Write HYBRID.md to your project root
+node bin/frug.js init --hybrid
 
 # Check status
 node bin/frug.js status
@@ -141,34 +156,32 @@ Claude reads the model cache and spawns sub-agents with the optimal model.
 
 ## Commands
 
-### OpenCode Commands
-
 | Command | Description |
 |---------|-------------|
-| `start` | Start Frugality for OpenCode |
-| `stop` | Stop the Frugality system |
-| `status` | Show system status and health |
-| `update` | Update model cache |
-| `doctor` | Diagnose and fix system issues |
-| `version` | Show version information |
-| `help` | Show help message |
-
-### Claude Code Commands
-
-| Command | Description |
-|---------|-------------|
-| `start` | Start in proxy mode (CCR as router) |
-| `start --agentic` | Start in agentic mode (Claude as router) |
-| `agent status` | Show agentic mode status |
+| `start` | Start proxy mode |
+| `start --agentic` | Fully-free agentic mode (Claude Code) |
+| `start --opencode` | Fully-free mode (OpenCode) |
+| `start --hybrid` | **Hybrid**: subscription main + free agents (Claude Code) |
+| `start --opencode --hybrid` | **Hybrid**: subscription main + free agents (OpenCode) |
+| `start --light` | Minimal mode, no watchdog |
+| `stop` | Stop all processes |
+| `status` | Show system status |
+| `status --verbose` | Status + cached model list |
+| `init --hybrid` | Write `HYBRID.md` to project root |
+| `init --opencode` | Write `OPENCODE.md` to project root |
+| `hybrid status` | Show hybrid mode details |
+| `hybrid config` | Show task-routing config |
+| `agent status` | Agentic mode details |
 | `agent models` | List cached models |
 | `agent refresh` | Refresh model cache |
-| `stop` | Stop the Frugality system |
-| `status` | Show system status and health |
-| `update` | Update model configurations |
-| `update --agentic` | Update agentic mode cache |
-| `doctor` | Diagnose and fix system issues |
-| `version` | Show version information |
-| `help` | Show help message |
+| `update` | Refresh model cache |
+| `doctor` | Diagnose and auto-fix issues |
+| `config show` | Show configuration |
+| `config set <key> <val>` | Set a config value |
+| `config reset` | Reset to defaults |
+| `interactive` | Interactive REPL (alias: `i`) |
+| `version` | Show version |
+| `help` | Show help |
 
 ## Configuration
 
@@ -186,6 +199,13 @@ Frugality uses environment variables for configuration:
 | `PING_TIMEOUT_MS` | 8000 | Health check timeout |
 | `CACHE_TTL_MS` | 1800000 | Cache TTL (30 min) |
 
+### Hybrid Mode Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FRUGALITY_MAIN_MODEL` | `claude-sonnet-4-6` | Main orchestrator model (hybrid mode) |
+| `FRUGALITY_MODE` | `free` | Operating mode: `free`, `agentic`, `hybrid` |
+
 ### OpenCode Configuration
 
 | Variable | Default | Description |
@@ -196,7 +216,7 @@ Frugality uses environment variables for configuration:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CCR_PORT` | 3456 | Claude Code Router port |
+| `CCR_PORT` | 3456 | Claude Code Router port (proxy mode) |
 | `CCR_PRESETS_DIR` | ~/.claude-code-router/presets | CCR presets directory |
 | `CCR_CONFIG` | ~/.claude-code-router/config.json | CCR configuration file |
 
@@ -207,22 +227,25 @@ frugality/
 ├── packages/
 │   ├── core/           # Core functionality
 │   │   ├── src/
-│   │   │   ├── bridge.js      # Model preset management
-│   │   │   ├── best-model.js  # Model selection & caching
+│   │   │   ├── bridge.js       # Model preset management (CCR)
+│   │   │   ├── best-model.js   # Model selection & per-task caching
+│   │   │   ├── hybrid.js       # Hybrid mode: routing + template generation
+│   │   │   ├── config.js       # Persistent configuration
 │   │   │   ├── idle-watcher.js # Idle detection & pending actions
 │   │   │   └── safe-restart.js # Safe restart logic
 │   │   └── test/
-│   ├── watchdog/      # Health monitoring
+│   ├── watchdog/       # Health monitoring
 │   │   ├── src/
-│   │   │   └── watchdog.js   # Health checks & restarts
+│   │   │   └── watchdog.js     # Health checks & restarts
 │   │   └── test/
-│   └── cli/           # CLI commands
-│       └── src/
-│           └── commands/
+│   └── skill/          # AI agent instruction documents
+│       ├── SKILL.md    # Fully-free agent rules
+│       └── HYBRID.md   # Hybrid mode routing rules
 ├── bin/
-│   └── frug.js        # Main CLI entry point
-└── config/
-    └── defaults.js    # Default configuration
+│   └── frug.js         # Main CLI entry point (all commands)
+├── HYBRID.md           # Written to project root by frug init --hybrid
+├── OPENCODE.md         # OpenCode agent instructions
+└── CLAUDE.md           # Claude Code session instructions
 ```
 
 ## Development

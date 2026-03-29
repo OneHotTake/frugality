@@ -56,7 +56,8 @@ describe('Failure Scenario Tests', () => {
     });
     
     it('should handle promoteStaged with missing manifest', () => {
-      const stagingDir = path.join(testPresetsDir, 'test', 'staging');
+      // Staging dir is now a sibling: .staging-<presetName> (not inside the preset dir)
+      const stagingDir = path.join(testPresetsDir, '.staging-test');
       fs.mkdirSync(stagingDir, { recursive: true });
       assert.throws(() => bridge.promoteStaged('test'), /Staged manifest not found/);
     });

@@ -24,54 +24,57 @@ const ensureDirs = () => {
 };
 
 const idleWatcher = {
+  // Check for pending restart or config actions and consume them (one-shot).
+  // Returns the action object if one was pending, null otherwise.
   checkAndApplyPending: () => {
     ensureDirs();
-    
+
     if (fs.existsSync(defaults.PENDING_RESTART)) {
       try {
         const content = fs.readFileSync(defaults.PENDING_RESTART, 'utf8');
         const pending = JSON.parse(content);
+        // Consume the file so the same action isn't replayed on the next poll
+        fs.unlinkSync(defaults.PENDING_RESTART);
         return { action: 'restart', data: pending };
       } catch (e) {
         return null;
       }
     }
-    
+
     if (fs.existsSync(defaults.PENDING_CONFIG)) {
       try {
         const content = fs.readFileSync(defaults.PENDING_CONFIG, 'utf8');
         const pending = JSON.parse(content);
+        fs.unlinkSync(defaults.PENDING_CONFIG);
         return { action: 'config', data: pending };
       } catch (e) {
         return null;
       }
     }
-    
+
     return null;
   },
 
   rotateLogs: () => {
     ensureDirs();
-    
+
     const logFile = path.join(defaults.LOG_DIR, 'frugality.log');
-    
+
     if (!fs.existsSync(logFile)) {
       return { rotated: false, reason: 'no log file' };
     }
-    
+
     try {
       const stats = fs.statSync(logFile);
-      
+
       if (stats.size < defaults.LOG_MAX_SIZE_BYTES) {
         return { rotated: false, reason: 'size below threshold' };
       }
-      
+
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const archiveName = `frugality-${timestamp}.log`;
-      const archivePath = path.join(defaults.LOG_DIR, archiveName);
-      
+      const archivePath = path.join(defaults.LOG_DIR, `frugality-${timestamp}.log`);
       fs.renameSync(logFile, archivePath);
-      
+
       return { rotated: true, archivePath };
     } catch (e) {
       return { rotated: false, error: e.message };
@@ -82,22 +85,21 @@ const idleWatcher = {
     if (running) {
       return { started: false, reason: 'already running' };
     }
-    
+
     const options = opts || {};
     const pollInterval = options.pollInterval || defaults.IDLE_POLL_MS;
-    
+
     ensureDirs();
-    
-    const pidPath = defaults.PID_IDLE_WATCHER;
-    fs.writeFileSync(pidPath, process.pid.toString());
-    
+
+    fs.writeFileSync(defaults.PID_IDLE_WATCHER, process.pid.toString());
+
     watcherInterval = setInterval(() => {
       idleWatcher.checkAndApplyPending();
       idleWatcher.rotateLogs();
     }, pollInterval);
-    
+
     running = true;
-    
+
     return { started: true, pollInterval };
   },
 
@@ -105,31 +107,28 @@ const idleWatcher = {
     if (!running) {
       return { stopped: false, reason: 'not running' };
     }
-    
+
     if (watcherInterval) {
       clearInterval(watcherInterval);
       watcherInterval = null;
     }
-    
-    const pidPath = defaults.PID_IDLE_WATCHER;
-    if (fs.existsSync(pidPath)) {
-      fs.unlinkSync(pidPath);
+
+    if (fs.existsSync(defaults.PID_IDLE_WATCHER)) {
+      fs.unlinkSync(defaults.PID_IDLE_WATCHER);
     }
-    
+
     running = false;
-    
+
     return { stopped: true };
   },
 
   isRunning: () => {
-    const pidPath = defaults.PID_IDLE_WATCHER;
-    
-    if (!fs.existsSync(pidPath)) {
+    if (!fs.existsSync(defaults.PID_IDLE_WATCHER)) {
       return false;
     }
-    
+
     try {
-      const pid = parseInt(fs.readFileSync(pidPath, 'utf8').trim(), 10);
+      const pid = parseInt(fs.readFileSync(defaults.PID_IDLE_WATCHER, 'utf8').trim(), 10);
       if (pid && !isNaN(pid)) {
         try {
           process.kill(pid, 0);
@@ -144,6 +143,7 @@ const idleWatcher = {
     }
   },
 
+  // Write a pending config file — idleWatcher will pick it up and consume it on the next poll.
   setPendingConfig: (config) => {
     ensureDirs();
     const configData = {
@@ -164,9 +164,9 @@ const idleWatcher = {
   setStateDir: (dir) => {
     defaults.STATE_DIR = dir;
     defaults.PENDING_RESTART = path.join(dir, 'pending-restart');
-    defaults.PENDING_CONFIG = path.join(dir, 'pending-config');
+    defaults.PENDING_CONFIG  = path.join(dir, 'pending-config');
   },
-  
+
   setLogDir: (dir) => {
     defaults.LOG_DIR = dir;
   },

@@ -225,21 +225,49 @@ Execute this EVERY session start:
 ## CLI Commands
 
 ```bash
-# Start for OpenCode (recommended)
+# Fully-free mode for OpenCode
 frug start --opencode
 
-# Start for Claude Code
+# Fully-free agentic mode for Claude Code
 frug start --agentic
 
+# Hybrid mode (subscription main + free agents) — Claude Code
+frug start --hybrid
+
+# Hybrid mode — OpenCode
+frug start --opencode --hybrid
+
+# Write HYBRID.md to your project (for hybrid mode)
+frug init --hybrid
+
 # Update model cache
-frug update --opencode
+frug update
 
 # Check status
-frug opencode status
+frug status
 
-# Diagnose issues
+# Show hybrid routing config
+frug hybrid config
+
+# Diagnose and auto-fix issues
 frug doctor
 ```
+
+## Operating Modes
+
+| Mode | Flag | Main Model | Agent Models |
+|------|------|-----------|-------------|
+| Fully Free | `--agentic` | Free | Free |
+| OpenCode Free | `--opencode` | Free | Free |
+| **Hybrid** | `--hybrid` | Anthropic subscription | Free |
+| OpenCode Hybrid | `--opencode --hybrid` | Anthropic subscription | Free |
+
+## Hybrid Mode
+
+When started with `--hybrid`, Frugality writes `HYBRID.md` to your project root.
+Read `HYBRID.md` at session start for routing rules and current agent models.
+
+Key principle: **you think, agents execute**.
 
 ## Free Models Resource
 

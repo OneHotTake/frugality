@@ -52,6 +52,13 @@ Frugality can be configured using environment variables. The following variables
 |----------|---------|-------------|
 | `LOG_MAX_SIZE_BYTES` | 5242880 | Max log file size (5MB) |
 
+### Hybrid Mode Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FRUGALITY_MAIN_MODEL` | `claude-sonnet-4-6` | Orchestrator model in hybrid mode |
+| `FRUGALITY_MODE` | `free` | Operating mode: `free`, `agentic`, `hybrid` |
+
 ### OpenCode Configuration
 
 | Variable | Default | Description |
@@ -62,7 +69,7 @@ Frugality can be configured using environment variables. The following variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CCR_PORT` | 3456 | Port for Claude Code Router |
+| `CCR_PORT` | 3456 | Port for Claude Code Router (proxy mode only) |
 | `CCR_CONFIG` | ~/.claude-code-router/config.json | CCR configuration file path |
 | `CCR_PRESETS_DIR` | ~/.claude-code-router/presets | CCR presets directory |
 
@@ -70,11 +77,19 @@ Frugality can be configured using environment variables. The following variables
 
 Frugality maintains state in the following files:
 
-- `~/.frugality/watchdog.pid` - Watchdog process ID
-- `~/.frugality/idle-watcher.pid` - Idle watcher process ID
-- `~/.frugality/state/pending-restart` - Pending restart data
-- `~/.frugality/state/pending-config` - Pending configuration
-- `~/.frugality/cache/model-cache.json` - Model selection cache
+- `~/.frugality/watchdog.pid` — Watchdog process ID
+- `~/.frugality/idle-watcher.pid` — Idle watcher process ID
+- `~/.frugality/state/pending-restart` — Pending restart (one-shot; consumed on read)
+- `~/.frugality/state/pending-config` — Pending config (one-shot; consumed on read)
+- `~/.frugality/state/agentic-mode` — Active agentic mode config
+- `~/.frugality/state/opencode-mode` — Active OpenCode mode config
+- `~/.frugality/state/hybrid-mode` — **Active hybrid mode config** ← new
+- `~/.frugality/cache/model-cache.json` — Structured model selection cache
+- `~/.frugality/cache/best-model-fast.txt` — Best fast model ID
+- `~/.frugality/cache/best-model-analysis.txt` — Best analysis model ID
+- `~/.frugality/cache/best-model-reasoning.txt` — Best reasoning model ID
+- `~/.frugality/cache/best-model-default.txt` — Default model ID
+- `~/.frugality/cache/best-model-fallback.txt` — Permanent fallback model ID
 
 ## Preset Format
 
@@ -122,35 +137,49 @@ Presets are stored in `~/.claude-code-router/presets/<name>/manifest.json`:
 
 ## Example Configuration
 
-### OpenCode
+### Hybrid Mode (Claude Code)
 
 ```bash
-# Set custom directories
-export OPENCODE_PRESETS_DIR="$HOME/.opencode/presets"
-export LOG_DIR="$HOME/.frugality/logs"
-export STATE_DIR="$HOME/.frugality/state"
+# Optional: override which Anthropic model is used as orchestrator
+export FRUGALITY_MAIN_MODEL="claude-opus-4-6"
 
-# Adjust timing
-export WATCHDOG_INTERVAL_MS=60000
-export IDLE_POLL_MS=5000
+# Start — free-model cache refreshes automatically
+node bin/frug.js start --hybrid
 
-# Start the system
-node bin/frug.js start
+# Write HYBRID.md to project root
+node bin/frug.js init --hybrid
+
+# Check what models are being used
+node bin/frug.js hybrid config
 ```
 
-### Claude Code
+### Hybrid Mode (OpenCode)
 
 ```bash
-# Set custom directories
+export FRUGALITY_MAIN_MODEL="claude-sonnet-4-6"
+node bin/frug.js start --opencode --hybrid
+node bin/frug.js init --hybrid
+```
+
+### Fully-Free OpenCode
+
+```bash
+export OPENCODE_PRESETS_DIR="$HOME/.opencode/presets"
+node bin/frug.js start --opencode
+```
+
+### Fully-Free Claude Code
+
+```bash
+export LOG_DIR="$HOME/.frugality/logs"
+export WATCHDOG_INTERVAL_MS=60000
+node bin/frug.js start --agentic
+```
+
+### Claude Code Proxy (requires CCR)
+
+```bash
 export CCR_PRESETS_DIR="$HOME/.ccr/presets"
 export CCR_CONFIG="$HOME/.ccr/config.json"
-export LOG_DIR="$HOME/.frugality/logs"
-export STATE_DIR="$HOME/.frugality/state"
-
-# Adjust timing
-export WATCHDOG_INTERVAL_MS=60000
-export IDLE_POLL_MS=5000
-
-# Start the system
 node bin/frug.js start
 ```

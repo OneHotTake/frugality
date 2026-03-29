@@ -222,7 +222,8 @@ describe('OpenCode Integration Tests', () => {
     
     it('should handle promoteStaged with missing manifest for opencode', () => {
       bridge.setPresetsDir(path.join(testDir, 'presets'));
-      fs.mkdirSync(path.join(testDir, 'presets', 'test-preset', 'staging'), { recursive: true });
+      // Staging dir is now a sibling: .staging-<presetName>
+      fs.mkdirSync(path.join(testDir, 'presets', '.staging-test-preset'), { recursive: true });
       assert.throws(() => bridge.promoteStaged('test-preset'), /Staged manifest not found/);
     });
     
