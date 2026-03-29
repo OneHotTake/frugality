@@ -29,10 +29,25 @@ PROVIDER_BASE_URLS = {
 }
 
 
+def backup_file(path):
+    if not os.path.exists(path):
+        return
+    from datetime import datetime
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = f"{path}.backup_{timestamp}"
+    import shutil
+
+    shutil.copy2(path, backup_path)
+    print(f"  Backed up existing config to {backup_path}")
+
+
 def atomic_write_json(path, data):
     dir_name = os.path.dirname(path)
     if dir_name and not os.path.exists(dir_name):
         os.makedirs(dir_name)
+
+    backup_file(path)
 
     fd, temp_path = tempfile.mkstemp(dir=dir_name, text=True)
     with os.fdopen(fd, "w") as f:
