@@ -1,118 +1,84 @@
-# Frugality
+# frugality
 
-Cost-optimized AI development using free-tier models for Claude Code or OpenCode.
+> Claude Code. Free models. Zero compromise.
 
-## Quick Start
+Professional AI-assisted development shouldn't require a paid API subscription
+for every token. **Frugality** is the orchestration layer that makes free-tier
+models a reliable foundation — not a compromise.
 
-### Installation
+## What it does
 
-```bash
-# Clone the repository
-git clone https://github.com/OneHotTake/frugality.git
-cd frugality
-
-# Run the installer (adds frug-claude, frug-opencode, and frug to /usr/local/bin)
-./install.sh
-```
-
-### For Claude Code (Recommended)
-
-**First time in a project:**
-```bash
-cd /path/to/your/project
-frug init --hybrid              # Initialize hybrid mode (creates HYBRID.md)
-```
-
-**Then use Claude Code normally:**
-```bash
-frug-claude                     # Starts Claude Code in hybrid mode with agents
-frug-claude --help              # Show Claude Code help
-```
-
-Or just use `claude` directly if you prefer—the agents are available whenever `HYBRID.md` exists in the project.
-
-### For OpenCode
-
-```bash
-cd /path/to/your/project
-frug init --opencode            # Initialize OpenCode mode (creates OPENCODE.md)
-frug-opencode                   # Starts OpenCode in hybrid mode
-```
-
-### Core Commands
-
-```bash
-frug init --hybrid              # Write HYBRID.md to current project (one time)
-frug start --hybrid             # Start hybrid mode system service
-frug status                     # Show system status
-frug start --agentic            # Fully free (all free-tier models)
-frug start --opencode           # OpenCode fully free
-frug stop                       # Stop all processes
-frug doctor                     # Diagnose and fix issues
-frug update                     # Refresh model cache
-```
-
-## Operating Modes
-
-| Mode | Main Model | Agents | Cost | Best For |
-|------|-----------|--------|------|----------|
-| **Hybrid** | Anthropic subscription | Free-tier | Low | Best reasoning + free agents |
-| **Fully Free** | Free-tier | Free-tier | $0 | Maximum cost savings |
-| **OpenCode Free** | Free-tier | Free-tier | $0 | OpenCode users, zero cost |
-
-## Configuration
-
-Set these environment variables to customize behavior:
-
-```bash
-export FRUGALITY_MAIN_MODEL="claude-sonnet-4-6"    # Default: claude-sonnet-4-6
-export WATCHDOG_INTERVAL_MS="300000"                # Health check interval (ms)
-export CACHE_TTL_MS="1800000"                       # Cache TTL (30 min)
-```
-
-State is stored in `~/.frugality/` (automatically created).
-
-## External Dependencies
-
-Frugality integrates with these systems:
-
-- **[Claude Code](https://github.com/anthropics/claude-code)** — Official CLI tool for Claude
-- **[OpenCode](https://github.com/anthropics/opencode)** — Agent-spawning platform for coding
-- **[Free Coding Models](https://github.com/anthropics/free-coding-models)** — Free-tier models for agents
-- **CCR (Claude Code Router)** — Optional routing layer for proxy mode (legacy)
-- **claudish** — Optional sub-agent spawning for Claude Code (legacy)
+- **Discovers free models** via `free-coding-models` CLI, live benchmarking
+- **Routes intelligently** through claude-code-router based on task type
+- **Stays responsive** with zero-interruption safe-restart logic
+- **Monitors health** and switches models when performance degrades
 
 ## Architecture
 
 ```
-frugality/
-├── bin/
-│   ├── frug.js           # Core CLI
-│   ├── frug-claude.js    # Claude Code wrapper (starts hybrid mode)
-│   └── frug-opencode.js  # OpenCode wrapper (starts hybrid mode)
-├── packages/
-│   ├── core/             # Model selection, caching, hybrid routing
-│   ├── watchdog/         # Health monitoring
-│   └── skill/            # Agent instruction templates
-└── HYBRID.md             # Claude Code hybrid mode config (generated)
+┌─────────────────────────────────────────┐
+│  Claude Code (Your brain, subscription)  │
+└──────────────┬──────────────────────────┘
+               │
+        ┌──────v────────┐
+        │  CCR (router) │
+        └──────┬────────┘
+               │
+    ┌──────────┼──────────┐
+    │          │          │
+   Free      Free      Free
+  Model A  Model B   Model C
+  (NVIDIA) (Groq)   (OpenRouter)
 ```
 
-## Development
+## Quick start
 
 ```bash
-npm install              # Install dependencies
-npm run test             # Run unit tests
-npm run doctor           # Diagnose issues
-npm run start            # Start system
-npm run lint             # Check code
+# Install
+npm install -g frugality
+
+# One-time project setup
+frug init
+
+# Start routing
+frug start
+
+# Code with free agents
+ccr code
 ```
 
-### Direct usage without installation
+## Commands
 
-```bash
-node bin/frug-claude.js  # Run wrapper directly
-node bin/frug.js --help  # Run CLI directly
-```
+| Command | Description |
+|---------|-------------|
+| `frug start` | Start watchdog + idle watcher |
+| `frug stop` | Stop all services |
+| `frug status` | Show current state |
+| `frug update [--immediate]` | Refresh model cache |
+| `frug init` | Initialize project |
+| `frug doctor` | Diagnose system |
+
+## Prerequisites
+
+- **Node.js** >= 18
+- **free-coding-models** ([install](https://github.com/anthropics/free-coding-models))
+- **CCR** (Claude Code Router)
+- **jq** (JSON processor)
+- **curl** (HTTP client)
+
+## How it works
+
+1. **Discovery**: Frugality queries `free-coding-models` for available models
+2. **Selection**: Best model selected for each task type (fast/analysis/reasoning)
+3. **Routing**: Router pushes config to CCR, which intercepts Claude Code's calls
+4. **Monitoring**: Watchdog pings models, detects degradation
+5. **Switching**: When a model degrades, bridge finds replacement, restarts safely
+
+## Contributing
+
+We welcome contributions! Presets are the highest-value way to contribute.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## License
 

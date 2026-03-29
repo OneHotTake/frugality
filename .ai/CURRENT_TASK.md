@@ -1,5 +1,3 @@
 # Current Task
-
-Initial project build — frugality v0.1.0
-
-Status: In progress
+Initial v0.1.0 build — Phase 1 complete
+Status: Scaffolding complete, creating core logic

@@ -1,177 +1,134 @@
+'use strict';
+
 const fs = require('fs');
 const path = require('path');
+const defaults = require('../../../config/defaults');
+const safeRestart = require('./safe-restart');
+const bridge = require('./bridge');
 
-const defaults = {
-  STATE_DIR: path.join(process.env.HOME || '/home/user', '.frugality/state'),
-  LOG_DIR: path.join(process.env.HOME || '/home/user', '.frugality/logs'),
-  PENDING_RESTART: path.join(process.env.HOME || '/home/user', '.frugality/state/pending-restart'),
-  PENDING_CONFIG: path.join(process.env.HOME || '/home/user', '.frugality/state/pending-config'),
-  LOG_MAX_SIZE_BYTES: 5 * 1024 * 1024,
-  IDLE_POLL_MS: 10000,
-  PID_IDLE_WATCHER: path.join(process.env.HOME || '/home/user', '.frugality/idle-watcher.pid')
-};
-
-let watcherInterval = null;
-let running = false;
-
-const ensureDirs = () => {
-  if (!fs.existsSync(defaults.STATE_DIR)) {
-    fs.mkdirSync(defaults.STATE_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(defaults.LOG_DIR)) {
-    fs.mkdirSync(defaults.LOG_DIR, { recursive: true });
-  }
-};
+let interval = null;
+let isRunning = false;
 
 const idleWatcher = {
-  // Check for pending restart or config actions and consume them (one-shot).
-  // Returns the action object if one was pending, null otherwise.
-  checkAndApplyPending: () => {
-    ensureDirs();
+  checkAndApplyPending: async () => {
+    try {
+      const pending = safeRestart.hasPendingRestart();
+      const configPending = fs.existsSync(defaults.PENDING_CONFIG);
 
-    if (fs.existsSync(defaults.PENDING_RESTART)) {
-      try {
-        const content = fs.readFileSync(defaults.PENDING_RESTART, 'utf8');
-        const pending = JSON.parse(content);
-        // Consume the file so the same action isn't replayed on the next poll
-        fs.unlinkSync(defaults.PENDING_RESTART);
-        return { action: 'restart', data: pending };
-      } catch (e) {
-        return null;
+      if (!pending.pending && !configPending) {
+        return { checked: true, applied: false };
       }
-    }
 
-    if (fs.existsSync(defaults.PENDING_CONFIG)) {
-      try {
-        const content = fs.readFileSync(defaults.PENDING_CONFIG, 'utf8');
-        const pending = JSON.parse(content);
-        fs.unlinkSync(defaults.PENDING_CONFIG);
-        return { action: 'config', data: pending };
-      } catch (e) {
-        return null;
+      const idle = safeRestart.isIdle(defaults.CCR_PORT, path.join(defaults.LOG_DIR, 'ccr.log'));
+      
+      if (!idle.idle) {
+        // Still busy, check age
+        if (pending.age > defaults.MAX_DEFER_WAIT_MS) {
+          console.warn(`[idle-watcher] Pending restart deferred for ${pending.age}ms, exceeds max wait`);
+        }
+        return { checked: true, applied: false, reason: 'busy' };
       }
-    }
 
-    return null;
+      // Idle! Apply pending
+      if (configPending) {
+        try {
+          const config = JSON.parse(fs.readFileSync(defaults.PENDING_CONFIG, 'utf8'));
+          bridge.promoteStaged(config.preset);
+          fs.unlinkSync(defaults.PENDING_CONFIG);
+        } catch (err) {
+          console.error(`[idle-watcher] Failed to apply config: ${err.message}`);
+        }
+      }
+
+      if (pending.pending) {
+        safeRestart.restartCCR();
+        safeRestart.clearPendingRestart();
+      }
+
+      return { checked: true, applied: true };
+    } catch (err) {
+      console.error(`[idle-watcher] Check failed: ${err.message}`);
+      return { checked: false, applied: false, error: err.message };
+    }
   },
 
   rotateLogs: () => {
-    ensureDirs();
-
-    const logFile = path.join(defaults.LOG_DIR, 'frugality.log');
-
-    if (!fs.existsSync(logFile)) {
-      return { rotated: false, reason: 'no log file' };
-    }
-
     try {
-      const stats = fs.statSync(logFile);
+      if (!fs.existsSync(defaults.LOG_DIR)) return;
 
-      if (stats.size < defaults.LOG_MAX_SIZE_BYTES) {
-        return { rotated: false, reason: 'size below threshold' };
+      const files = fs.readdirSync(defaults.LOG_DIR);
+      for (const file of files) {
+        const filePath = path.join(defaults.LOG_DIR, file);
+        const stat = fs.statSync(filePath);
+        
+        if (stat.size > defaults.LOG_MAX_SIZE_BYTES) {
+          const rotated = filePath + '.1';
+          if (fs.existsSync(rotated)) {
+            fs.unlinkSync(rotated);
+          }
+          fs.renameSync(filePath, rotated);
+        }
       }
-
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const archivePath = path.join(defaults.LOG_DIR, `frugality-${timestamp}.log`);
-      fs.renameSync(logFile, archivePath);
-
-      return { rotated: true, archivePath };
-    } catch (e) {
-      return { rotated: false, error: e.message };
+    } catch (err) {
+      console.error(`[idle-watcher] Log rotation failed: ${err.message}`);
     }
   },
 
   start: (opts) => {
-    if (running) {
-      return { started: false, reason: 'already running' };
+    opts = opts || {};
+    const pollInterval = opts.pollInterval || defaults.IDLE_POLL_MS;
+
+    if (isRunning) return { already: true };
+
+    try {
+      // Create state dir
+      if (!fs.existsSync(defaults.STATE_DIR)) {
+        fs.mkdirSync(defaults.STATE_DIR, { recursive: true });
+      }
+
+      // Write PID file
+      fs.writeFileSync(defaults.PID_IDLE_WATCHER, process.pid.toString(), 'utf8');
+      isRunning = true;
+
+      interval = setInterval(() => {
+        idleWatcher.checkAndApplyPending();
+        idleWatcher.rotateLogs();
+      }, pollInterval);
+
+      return { started: true, pid: process.pid, interval: pollInterval };
+    } catch (err) {
+      console.error(`[idle-watcher] Start failed: ${err.message}`);
+      return { started: false, error: err.message };
     }
-
-    const options = opts || {};
-    const pollInterval = options.pollInterval || defaults.IDLE_POLL_MS;
-
-    ensureDirs();
-
-    fs.writeFileSync(defaults.PID_IDLE_WATCHER, process.pid.toString());
-
-    watcherInterval = setInterval(() => {
-      idleWatcher.checkAndApplyPending();
-      idleWatcher.rotateLogs();
-    }, pollInterval);
-
-    running = true;
-
-    return { started: true, pollInterval };
   },
 
   stop: () => {
-    if (!running) {
-      return { stopped: false, reason: 'not running' };
+    if (interval) {
+      clearInterval(interval);
+      interval = null;
     }
-
-    if (watcherInterval) {
-      clearInterval(watcherInterval);
-      watcherInterval = null;
+    isRunning = false;
+    try {
+      if (fs.existsSync(defaults.PID_IDLE_WATCHER)) {
+        fs.unlinkSync(defaults.PID_IDLE_WATCHER);
+      }
+    } catch (err) {
+      // Ignore
     }
-
-    if (fs.existsSync(defaults.PID_IDLE_WATCHER)) {
-      fs.unlinkSync(defaults.PID_IDLE_WATCHER);
-    }
-
-    running = false;
-
     return { stopped: true };
   },
 
   isRunning: () => {
-    if (!fs.existsSync(defaults.PID_IDLE_WATCHER)) {
-      return false;
-    }
-
     try {
-      const pid = parseInt(fs.readFileSync(defaults.PID_IDLE_WATCHER, 'utf8').trim(), 10);
-      if (pid && !isNaN(pid)) {
-        try {
-          process.kill(pid, 0);
-          return true;
-        } catch (e) {
-          return false;
-        }
-      }
-      return false;
-    } catch (e) {
+      if (!fs.existsSync(defaults.PID_IDLE_WATCHER)) return false;
+      const pid = parseInt(fs.readFileSync(defaults.PID_IDLE_WATCHER, 'utf8').trim());
+      // Check if process exists
+      process.kill(pid, 0);
+      return true;
+    } catch (err) {
       return false;
     }
-  },
-
-  // Write a pending config file — idleWatcher will pick it up and consume it on the next poll.
-  setPendingConfig: (config) => {
-    ensureDirs();
-    const configData = {
-      config: config || {},
-      timestamp: new Date().toISOString()
-    };
-    fs.writeFileSync(defaults.PENDING_CONFIG, JSON.stringify(configData, null, 2));
-    return configData;
-  },
-
-  clearPendingConfig: () => {
-    if (fs.existsSync(defaults.PENDING_CONFIG)) {
-      fs.unlinkSync(defaults.PENDING_CONFIG);
-    }
-    return true;
-  },
-
-  setStateDir: (dir) => {
-    defaults.STATE_DIR = dir;
-    defaults.PENDING_RESTART = path.join(dir, 'pending-restart');
-    defaults.PENDING_CONFIG  = path.join(dir, 'pending-config');
-  },
-
-  setLogDir: (dir) => {
-    defaults.LOG_DIR = dir;
-  },
-
-  getDefaults: () => ({ ...defaults })
+  }
 };
 
 module.exports = idleWatcher;

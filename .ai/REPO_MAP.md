@@ -1,18 +1,20 @@
 # Repository Map
 
-* `packages/core`: The core logic of Frugality, responsible for model selection, caching, and routing.
-* `packages/watchdog`: A health monitor that triggers bridge updates when models degrade.
-* `packages/cli`: The command-line interface for Frugality, providing commands for starting, stopping, and updating the system.
-* `packages/skill`: The skill document for Frugality, defining the delegation rules and guidelines for AI-assisted development.
-* `config/defaults.js`: The default configuration for Frugality.
-* `bin/frug.js`: The main entry point for the Frugality CLI.
-* `presets/`: The directory containing preset configurations for Frugality.
-* `docs/`: The directory containing documentation for Frugality.
-* `scripts/`: The directory containing scripts for Frugality.
-* `.ai/`: The directory containing state files for Frugality.
-* `.prompts/`: The directory containing prompt files for Frugality.
-* `CLAUDE.md`: The operational guide for the Frugality repository.
-* `README.md`: The README file for the Frugality repository.
-* `CONTRIBUTING.md`: The contributing guide for the Frugality repository.
-* `LICENSE`: The license file for the Frugality repository.
-* `package.json`: The package.json file for the Frugality repository.
+## Structure
+- `bin/` — CLI entry point (frug.js)
+- `packages/core/` — Model selection, bridging, restarts
+- `packages/watchdog/` — Health monitoring
+- `packages/skill/` — Delegation guide
+- `config/` — Configuration defaults
+- `docs/` — Documentation
+- `presets/` — CCR preset configurations
+- `.ai/` — AI orchestration state
+
+## Key Files
+- `config/defaults.js` — Single source of truth
+- `packages/core/src/best-model.js` — Model discovery + caching
+- `packages/core/src/bridge.js` — FCM-to-CCR bridge
+- `packages/core/src/safe-restart.js` — Zero-interruption restart
+- `packages/core/src/idle-watcher.js` — Deferred apply logic
+- `packages/watchdog/src/watchdog.js` — Health monitoring
+- `bin/frug.js` — Main CLI

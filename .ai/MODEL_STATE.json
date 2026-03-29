@@ -1,13 +1,8 @@
-const fs = require('fs');
-const path = require('path');
-
-const modelState = {
-  "default": "route:code-fast",
-  "background": "route:code-fast",
-  "think": "route:code-accurate",
-  "longContext": "route:longctx-analysis",
-  "lastUpdated": "[TODAY]",
-  "note": "Actual bindings resolved by frugality bridge via CCR. Do not hardcode model names."
-};
-
-fs.writeFileSync('.ai/MODEL_STATE.json', JSON.stringify(modelState, null, 2));
+{
+  "default": "auto-selected",
+  "background": "auto-selected",
+  "think": "auto-selected",
+  "longContext": "auto-selected",
+  "lastUpdated": "2026-03-29",
+  "note": "Models are discovered and selected by frugality bridge at runtime"
+}

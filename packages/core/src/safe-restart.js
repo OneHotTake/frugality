@@ -1,201 +1,155 @@
+'use strict';
+
 const fs = require('fs');
-const path = require('path');
 const { execSync } = require('child_process');
-const http = require('http');
-
-const defaults = {
-  PENDING_RESTART: path.join(process.env.HOME || '/home/user', '.frugality/state/pending-restart'),
-  CCR_PORT: 3456,
-  PING_TIMEOUT_MS: 8000,
-  ACTIVE_REQUEST_TIMEOUT_S: 30,
-  LOG_DIR: path.join(process.env.HOME || '/home/user', '.frugality/logs'),
-  STATE_DIR: path.join(process.env.HOME || '/home/user', '.frugality/state'),
-  PID_WATCHDOG: path.join(process.env.HOME || '/home/user', '.frugality/watchdog.pid')
-};
-
-const ensureDirs = () => {
-  if (!fs.existsSync(defaults.STATE_DIR)) {
-    fs.mkdirSync(defaults.STATE_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(defaults.LOG_DIR)) {
-    fs.mkdirSync(defaults.LOG_DIR, { recursive: true });
-  }
-};
+const defaults = require('../../../config/defaults');
 
 const safeRestart = {
   getActiveConnections: (port) => {
-    ensureDirs();
-    const testPort = port || defaults.CCR_PORT;
-    
-    return new Promise((resolve) => {
-      const req = http.request({
-        hostname: 'localhost',
-        port: testPort,
-        path: '/health',
-        method: 'GET',
-        timeout: 1000
-      }, (res) => {
-        resolve({ count: res.statusCode === 200 ? 1 : 0, healthy: true });
-      });
-      
-      req.on('error', () => {
-        resolve({ count: 0, healthy: false });
-      });
-      
-      req.on('timeout', () => {
-        req.destroy();
-        resolve({ count: 0, healthy: false });
-      });
-      
-      req.end();
-    });
+    try {
+      const output = execSync(`ss -tan | grep :${port} | wc -l`, { encoding: 'utf8' });
+      return parseInt(output.trim()) || 0;
+    } catch (err) {
+      try {
+        const output = execSync(`lsof -i :${port} 2>/dev/null | wc -l`, { encoding: 'utf8' });
+        return Math.max(0, parseInt(output.trim()) - 1); // Subtract header
+      } catch (e) {
+        return 0;
+      }
+    }
   },
 
   isRequestInFlight: (logPath, timeoutSeconds) => {
-    const logFile = logPath || path.join(defaults.LOG_DIR, 'requests.log');
-    const timeout = timeoutSeconds || defaults.ACTIVE_REQUEST_TIMEOUT_S;
-    
-    if (!fs.existsSync(logFile)) {
-      return false;
-    }
-    
     try {
-      const stats = fs.statSync(logFile);
-      const now = Date.now();
-      const fileAge = now - stats.mtimeMs;
+      if (!fs.existsSync(logPath)) return false;
       
-      return fileAge < (timeout * 1000);
-    } catch {
+      const lines = fs.readFileSync(logPath, 'utf8').split('\n').filter(l => l.trim());
+      if (lines.length === 0) return false;
+
+      const lastLine = lines[lines.length - 1];
+      const match = lastLine.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+      if (!match) return false;
+
+      const lastTs = new Date(match[0]).getTime();
+      const age = (Date.now() - lastTs) / 1000;
+      
+      return age < timeoutSeconds && !lastLine.includes('completed');
+    } catch (err) {
       return false;
     }
   },
 
-  isIdle: () => {
-    return safeRestart.getActiveConnections().then(connections => {
-      return connections.count === 0 && !safeRestart.isRequestInFlight();
-    });
+  isIdle: (port, logPath) => {
+    const connections = safeRestart.getActiveConnections(port);
+    const inFlight = safeRestart.isRequestInFlight(logPath, defaults.ACTIVE_REQUEST_TIMEOUT_S);
+
+    return {
+      idle: connections === 0 && !inFlight,
+      connections,
+      inFlight,
+      reason: connections > 0 ? `${connections} active connections` : 
+              inFlight ? 'request in flight' : null
+    };
   },
 
   setPendingRestart: (reason) => {
-    ensureDirs();
-    const restartData = {
-      reason: reason || 'unspecified',
-      timestamp: new Date().toISOString()
-    };
-    fs.writeFileSync(defaults.PENDING_RESTART, JSON.stringify(restartData, null, 2));
-    return restartData;
+    try {
+      fs.mkdirSync(defaults.STATE_DIR, { recursive: true });
+      const tempFile = defaults.PENDING_RESTART + '.tmp';
+      const data = { reason, timestamp: new Date().toISOString() };
+      fs.writeFileSync(tempFile, JSON.stringify(data), 'utf8');
+      fs.renameSync(tempFile, defaults.PENDING_RESTART);
+    } catch (err) {
+      console.error(`Failed to set pending restart: ${err.message}`);
+    }
   },
 
   clearPendingRestart: () => {
-    if (fs.existsSync(defaults.PENDING_RESTART)) {
-      fs.unlinkSync(defaults.PENDING_RESTART);
+    try {
+      if (fs.existsSync(defaults.PENDING_RESTART)) {
+        fs.unlinkSync(defaults.PENDING_RESTART);
+      }
+    } catch (err) {
+      console.error(`Failed to clear pending restart: ${err.message}`);
     }
-    return true;
   },
 
   hasPendingRestart: () => {
-    return fs.existsSync(defaults.PENDING_RESTART);
-  },
-
-  restartCCR: () => {
-    ensureDirs();
-    
     try {
-      const pidPath = defaults.PID_WATCHDOG;
-      if (fs.existsSync(pidPath)) {
-        const pid = parseInt(fs.readFileSync(pidPath, 'utf8').trim(), 10);
-        if (pid && !isNaN(pid)) {
-          try {
-            process.kill(pid, 'SIGTERM');
-          } catch (e) {
-          }
-        }
+      if (!fs.existsSync(defaults.PENDING_RESTART)) {
+        return { pending: false };
       }
-      
-      return { success: true, message: 'CCR restart initiated' };
-    } catch (error) {
-      return { success: false, error: error.message };
+      const data = JSON.parse(fs.readFileSync(defaults.PENDING_RESTART, 'utf8'));
+      const age = Date.now() - new Date(data.timestamp).getTime();
+      return { pending: true, age, reason: data.reason };
+    } catch (err) {
+      return { pending: false };
     }
   },
 
   verifyCCRHealth: (port, timeout) => {
-    const testPort = port || defaults.CCR_PORT;
-    const testTimeout = timeout || defaults.PING_TIMEOUT_MS;
+    timeout = timeout || 30000;
+    const start = Date.now();
     
-    return new Promise((resolve) => {
-      const req = http.request({
-        hostname: 'localhost',
-        port: testPort,
-        path: '/health',
-        method: 'GET',
-        timeout: testTimeout
-      }, (res) => {
-        const healthy = res.statusCode === 200;
-        resolve({ healthy, statusCode: res.statusCode });
-      });
-      
-      req.on('error', (err) => {
-        resolve({ healthy: false, error: err.message });
-      });
-      
-      req.on('timeout', () => {
-        req.destroy();
-        resolve({ healthy: false, error: 'timeout' });
-      });
-      
-      req.end();
-    });
-  },
-
-  safeRestart: async (opts) => {
-    const options = opts || {};
-    const force = options.force || false;
-    const reason = options.reason || 'manual restart';
-    
-    if (!force) {
-      const idle = await safeRestart.isIdle();
-      if (!idle) {
-        safeRestart.setPendingRestart(reason);
-        return { status: 'pending', reason: 'not idle' };
-      }
-    }
-    
-    const result = safeRestart.restartCCR();
-    
-    if (result.success) {
-      safeRestart.clearPendingRestart();
-      return { status: 'restarted', reason };
-    }
-    
-    return { status: 'failed', error: result.error };
-  },
-
-  getPendingRestart: () => {
-    if (fs.existsSync(defaults.PENDING_RESTART)) {
+    while (Date.now() - start < timeout) {
       try {
-        const content = fs.readFileSync(defaults.PENDING_RESTART, 'utf8');
-        return JSON.parse(content);
-      } catch {
-        return null;
+        const output = execSync(`curl -s http://localhost:${port}/health 2>&1`, { 
+          timeout: 5000,
+          encoding: 'utf8'
+        });
+        if (output.includes('ok') || output.includes('healthy')) {
+          return { healthy: true, latencyMs: Date.now() - start };
+        }
+      } catch (err) {
+        // Still waiting
       }
+      
+      // Wait 500ms before retry
+      const delay = () => new Promise(resolve => setTimeout(resolve, 500));
+      require('util').promisify(setTimeout)(500);
     }
-    return null;
+
+    return { healthy: false, latencyMs: timeout };
   },
 
-  setStateDir: (dir) => {
-    defaults.STATE_DIR = dir;
-    defaults.PENDING_RESTART = path.join(dir, 'pending-restart');
-  },
-  
-  setLogDir: (dir) => {
-    defaults.LOG_DIR = dir;
-  },
-  
-  setPort: (port) => {
-    defaults.CCR_PORT = port;
+  restartCCR: () => {
+    try {
+      execSync('ccr restart', { timeout: 60000 });
+      return { restarted: true };
+    } catch (err) {
+      throw new Error(`CCR restart failed: ${err.message}`);
+    }
   },
 
-  getDefaults: () => ({ ...defaults })
+  safeRestart: (opts) => {
+    opts = opts || {};
+    const force = opts.force || false;
+    const wait = opts.wait || false;
+    const maxWaitMs = opts.maxWaitMs || defaults.MAX_DEFER_WAIT_MS;
+
+    if (force) {
+      safeRestart.restartCCR();
+      safeRestart.clearPendingRestart();
+      return { restarted: true, deferred: false, reason: 'forced' };
+    }
+
+    const idle = safeRestart.isIdle(defaults.CCR_PORT, path.join(defaults.LOG_DIR, 'ccr.log'));
+    
+    if (idle.idle) {
+      safeRestart.restartCCR();
+      safeRestart.clearPendingRestart();
+      return { restarted: true, deferred: false, reason: 'idle' };
+    }
+
+    if (wait) {
+      safeRestart.setPendingRestart('waiting for idle');
+      return { restarted: false, deferred: true, reason: idle.reason };
+    }
+
+    safeRestart.setPendingRestart(idle.reason);
+    return { restarted: false, deferred: true, reason: idle.reason };
+  }
 };
 
+const path = require('path');
 module.exports = safeRestart;
