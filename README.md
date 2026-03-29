@@ -7,19 +7,23 @@ Cost-optimized AI development using free-tier models for Claude Code or OpenCode
 ### For Claude Code (Recommended)
 
 ```bash
-# Install
-npm install -g frugality
-# or for development: cd frugality && npm link
+# Clone and set up
+git clone https://github.com/OneHotTake/frugality.git
+cd frugality
+npm install
+
+# Make commands available globally
+npm link
 
 # Run
-frug-claude                    # Starts Claude Code in hybrid mode (subscription + free agents)
+frug-claude                    # Starts Claude Code in hybrid mode
 frug-claude --help             # Show Claude Code help
-frug-claude < my-script.txt    # Pipe input as usual
 ```
 
 ### For OpenCode
 
 ```bash
+# Same setup as above, then:
 frug-opencode                  # Starts OpenCode in hybrid mode
 frug-opencode --help           # Show OpenCode help
 ```
@@ -84,11 +88,16 @@ frugality/
 ## Development
 
 ```bash
-npm install                # Install dependencies
-npm run test              # Run unit tests
-npm run doctor            # Diagnose issues
-npm run start             # Start system
-npm run lint              # Check code
+npm install                           # Install dependencies
+npm link                              # Make frug-* commands available globally
+npm run test                          # Run unit tests
+node bin/frug.js doctor               # Diagnose issues
+npm run start                         # Start system
+npm run lint                          # Check code
+
+# Direct usage without npm link
+node bin/frug-claude.js               # Run frug-claude directly
+node bin/frug.js start --hybrid       # Run frug directly
 ```
 
 ## License
