@@ -1,6 +1,13 @@
 # Frugality
 
+> Claude Code. Free models. Zero compromise.
+
 Cost-optimized AI development using free-tier models for Claude Code and OpenCode.
+
+Claude Code is the best AI coding agent available. But every background task,
+test generation, and boilerplate call burns your API quota. Frugality fixes that
+by automatically routing those calls to free-tier models — so Claude stays sharp
+for the decisions only Claude can make.
 
 ## Overview
 
@@ -110,6 +117,20 @@ claude
 # Launch OpenCode with best S-tier model
 frugal-opencode
 ```
+
+## How Routing Works
+
+Frugality maps free-coding-models tier ratings to CCR route slots:
+
+| CCR Route     | Model Tier | What runs here                          |
+|---------------|------------|-----------------------------------------|
+| default       | S-tier     | General coding tasks                    |
+| background    | A-tier     | File reads, searches, lightweight tasks |
+| think         | S+ w/ reasoning | Plan mode, complex debugging       |
+| longContext   | >32K ctx   | Large file analysis, log review         |
+
+Claude Code automatically uses the right slot per task.
+You never touch the config.
 
 ## Usage
 
@@ -245,9 +266,28 @@ frugality/
 │   ├── cache/            # Model cache
 │   └── logs/             # Logs
 ├── frugality.py          # Main orchestration script
+├── opencode.json         # Template OpenCode provider configuration for NVIDIA NIM
 └── README.md             # This file
 ```
+
+## Roadmap
+
+- [ ] `--dry-run` flag — preview config changes without writing
+- [ ] `--tier` flag — override default S-tier selection  
+- [ ] Watchdog mode — auto-refresh model when latency degrades
+- [ ] Safe restart — defer CCR restart during active Claude sessions
+- [ ] `frug doctor` — diagnostic command for troubleshooting
+- [ ] claudish integration — sub-agent model selection via skill doc
+- [ ] Community preset library — shareable CCR configurations
+
+Contributions welcome. See [CONTRIBUTING.md] if it exists, or open an issue.
 
 ## License
 
 MIT
+
+<!-- 
+TODO: Set GitHub repo metadata:
+Description: Claude Code. Free models. Zero compromise.
+Topics: claude-code, free-tier, ai-coding, opencode, llm-routing, claude-code-router
+-->
