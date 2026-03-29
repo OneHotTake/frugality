@@ -17,7 +17,14 @@ const flags = args.slice(1);
 
 const commands = {
   async start(opts) {
-    console.log(`[frug] Starting frugality v${defaults.VERSION}...`);
+    // Determine mode from flags
+    const isHybrid = opts.includes('--hybrid') || opts.includes('-H');
+    const isAgentic = opts.includes('--agentic') || opts.includes('-a');
+    const isOpenCode = opts.includes('--opencode') || opts.includes('-o');
+    
+    const mode = isHybrid ? 'hybrid' : isAgentic ? 'agentic' : isOpenCode ? 'opencode' : 'proxy';
+    
+    console.log(`[frug] Starting frugality v${defaults.VERSION} in ${mode} mode...`);
     
     // Check all dependencies
     const deps = ['free-coding-models', 'ccr', 'jq', 'curl'];
@@ -35,18 +42,20 @@ const commands = {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     });
 
-    // Run bridge to select models
-    try {
-      const result = await bridge.runBridge({ immediate: true });
-      console.log('✓ Models selected and applied');
-    } catch (err) {
-      console.error(`⚠ Bridge failed: ${err.message}`);
+    // Run bridge to select models (for non-proxy modes)
+    if (mode !== 'proxy') {
+      try {
+        await bestModel.refreshAll();
+        console.log('✓ Models selected and cached');
+      } catch (err) {
+        console.error(`⚠ Model selection failed: ${err.message}`);
+      }
     }
 
-    // Start daemons
+    // Start daemons unless disabled
     if (!opts.includes('--no-watchdog')) {
       watchdog.start();
-      console.log(`✓ Watchdog started (PID ${process.pid})`);
+      console.log(`✓ Watchdog started`);
     }
 
     if (!opts.includes('--no-idle-watcher')) {
@@ -65,8 +74,8 @@ const commands = {
       }
     }
 
-    console.log('\n✓ Frugality ready!');
-    console.log('Next: ccr code');
+    console.log(`\n✓ Frugality ready in ${mode} mode!`);
+    console.log(`Next: ${isOpenCode ? 'opencode' : 'ccr'} code`);
   },
 
   async stop() {
@@ -128,7 +137,7 @@ const commands = {
     console.log('✓ Initialized frugality');
     console.log('✓ Directories created');
     console.log('✓ Skill installed');
-    console.log('\nNext: frug start');
+    console.log('\nNext: frug start [--hybrid|--agentic|--opencode]');
   },
 
   doctor() {
@@ -171,25 +180,38 @@ const commands = {
   },
 
   help() {
-    console.log(`\nfrugality v${defaults.VERSION}
+    console.log(`
+frugality v${defaults.VERSION}
 Claude Code. Free models. Zero compromise.
 
 Usage: frug <command> [options]
 
 Commands:
-  start                 Start frugality (watchdog + idle watcher)
+  start [MODE]          Start frugality with optional mode:
+    --hybrid            Subscription main + free agents (default for frug-claude)
+    --agentic           All free-tier models
+    --opencode          OpenCode fully-free mode
+    Default: proxy mode (CCR health monitoring)
+    
   stop                  Stop all services
   status                Show system status
   update [--immediate]  Refresh model cache
-  init                  Initialize frugality in current project
+  init                  Initialize frugality in project
   doctor                Diagnose system
   help                  Show this message
 
 Examples:
-  frug start
-  frug update --immediate
-  frug status
-\n`);
+  frug start                    # Proxy mode
+  frug start --hybrid           # Subscription + free agents
+  frug start --agentic          # Fully free
+  frug start --opencode --hybrid # OpenCode hybrid
+  frug-claude                   # Convenience: Claude Code hybrid mode
+  frug-opencode                 # Convenience: OpenCode hybrid mode
+
+Convenience Wrappers:
+  frug-claude    = frug start --hybrid (Claude Code in hybrid mode)
+  frug-opencode  = frug start --opencode --hybrid (OpenCode hybrid)
+`);
   },
 
   version() {

@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "description": "Claude Code. Free models. Zero compromise.",
   "bin": {
-    "frug": "./bin/frug.js"
+    "frug": "./bin/frug.js",
+    "frug-claude": "./bin/frug-claude.js",
+    "frug-opencode": "./bin/frug-opencode.js"
   },
   "scripts": {
     "test": "node --test packages/*/test/*.test.js",
