@@ -3,13 +3,16 @@
   "version": "0.3.0",
   "description": "Claude Code. Free models. Zero compromise.",
   "bin": {
-    "frug": "./bin/frug.js"
+    "frug": "./bin/frug.js",
+    "frug-claude": "./bin/frug-claude.js",
+    "frug-opencode": "./bin/frug-opencode.js"
   },
   "scripts": {
     "test": "node --test packages/*/test/*.test.js",
     "stress-test": "bash scripts/stress-test.sh",
     "doctor": "node bin/frug.js doctor",
     "start": "node bin/frug.js start",
+    "update": "node bin/frug.js update",
     "lint": "node --check packages/*/src/*.js bin/frug.js"
   },
   "keywords": ["claude-code", "ai", "free-tier", "routing", "orchestration"],

@@ -44,11 +44,11 @@ alias frug-start='frug start'
 alias frug-stop='frug stop'
 alias frug-status='frug status'
 alias frug-agent='frug agent'
-alias frug-now='frug start --agentic'
+alias frug-hybrid='frug start --hybrid'
 alias frug-doctor='frug doctor'
 
-# Quick: start coding
-alias code='frug-now'
+# Quick: start coding with hybrid mode
+alias code='frug-hybrid'
 "
   
   log_info "Adding to shell configuration..."
@@ -70,18 +70,23 @@ alias code='frug-now'
     fi
   fi
   
-  log_info "Installing frug binary..."
+  log_info "Installing frug binaries..."
   cp "$PROJECT_DIR/bin/frug.js" "$FRUG_DIR/bin/frug.js"
+  cp "$PROJECT_DIR/bin/frug-claude.js" "$FRUG_DIR/bin/frug-claude.js"
+  cp "$PROJECT_DIR/bin/frug-opencode.js" "$FRUG_DIR/bin/frug-opencode.js"
   chmod +x "$FRUG_DIR/bin/frug.js"
-  
+  chmod +x "$FRUG_DIR/bin/frug-claude.js"
+  chmod +x "$FRUG_DIR/bin/frug-opencode.js"
+
   log_success "Frugality installed successfully!"
   echo ""
   echo -e "${GREEN}Quick start:${NC}"
   echo "  source ~/.bashrc    # or ~/.zshrc"
-  echo "  frug start --agentic"
+  echo "  frug-claude         # Start Claude Code in hybrid mode"
   echo ""
-  echo -e "${YELLOW}Or use directly:${NC}"
-  echo "  node $FRUG_DIR/bin/frug.js start --agentic"
+  echo -e "${YELLOW}For developers, use npm link:${NC}"
+  echo "  cd $PROJECT_DIR && npm link"
+  echo "  frug-claude --help"
 }
 
 uninstall_frug() {
@@ -109,7 +114,7 @@ setup_auto_start() {
 Type=Application
 Name=Frugality
 Comment=Cost-Optimized AI Development
-Exec=node $FRUG_DIR/bin/frug.js start --agentic
+Exec=node $FRUG_DIR/bin/frug.js start --hybrid
 Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true
