@@ -99,16 +99,18 @@ const bestModel = {
     try {
       const models = bestModel.queryFreeModels();
       if (!models || models.length === 0) throw new Error('No models available');
-      
+
       const taskTypes = ['default', 'fast', 'analysis', 'reasoning'];
       const results = {};
-      
+
       for (const taskType of taskTypes) {
         const selected = bestModel.selectByTaskType(models, taskType);
         if (selected) {
-          const providerKey = bestModel.extractProviderKey(selected.modelId, defaults.FCM_JSON);
-          bestModel.writeCache(taskType, selected.modelId, providerKey ? providerKey.keyName : null);
-          results[taskType] = selected.modelId;
+          // Handle both modelId and id properties
+          const modelId = selected.modelId || selected.id || JSON.stringify(selected).substring(0, 50);
+          const providerKey = bestModel.extractProviderKey(modelId, defaults.FCM_JSON);
+          bestModel.writeCache(taskType, modelId, providerKey ? providerKey.keyName : null);
+          results[taskType] = modelId;
         }
       }
       return { success: true, updated: results };
@@ -124,9 +126,11 @@ const bestModel = {
       const models = bestModel.queryFreeModels();
       const selected = bestModel.selectByTaskType(models, taskType);
       if (selected) {
-        const providerKey = bestModel.extractProviderKey(selected.modelId, defaults.FCM_JSON);
-        bestModel.writeCache(taskType, selected.modelId, providerKey ? providerKey.keyName : null);
-        return selected.modelId;
+        // Handle both modelId and id properties
+        const modelId = selected.modelId || selected.id || JSON.stringify(selected).substring(0, 50);
+        const providerKey = bestModel.extractProviderKey(modelId, defaults.FCM_JSON);
+        bestModel.writeCache(taskType, modelId, providerKey ? providerKey.keyName : null);
+        return modelId;
       }
     } catch (err) {
       return null;

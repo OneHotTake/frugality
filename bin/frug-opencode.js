@@ -6,6 +6,13 @@ const { spawnSync } = require('child_process');
 const frug = require('./frug');
 
 async function main() {
+  process.stderr.write('[frugality] Initializing...\n');
+  try {
+    await frug.run(['init']);
+  } catch (err) {
+    process.stderr.write('[frugality] Init error (continuing): ' + err.message + '\n');
+  }
+
   process.stderr.write('[frugality] Starting hybrid mode for OpenCode...\n');
   await frug.run(['start', '--opencode', '--hybrid']);
 
