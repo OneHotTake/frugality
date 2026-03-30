@@ -303,9 +303,9 @@ def update_ccr_config():
             model_id = model_data["modelId"]
             provider = model_data.get("provider", "")
             if provider:
-                router_config[role] = f"{provider},{model_id.split('/')[-1]}"
+                router_config[role] = f"{provider},{model_id}"
             else:
-                router_config[role] = model_id.split("/")[-1]
+                router_config[role] = model_id
 
     ccr_config = {"Providers": providers, "Router": router_config}
 
