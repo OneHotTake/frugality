@@ -30,6 +30,7 @@ Frugality is a lightweight orchestration tool that automatically discovers and c
 ## Requirements
 
 - Python 3.7+
+- Node.js 18+ (required by free-coding-models)
 - [free-coding-models](https://github.com/vava-nessa/free-coding-models) - Model discovery
 - [Claude Code Router](https://github.com/musistudio/claude-code-router) - For Claude Code routing
 - OpenCode (optional) - For OpenCode integration
