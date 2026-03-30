@@ -97,25 +97,121 @@ echo ""
 # Create ~/bin/ if it doesn't exist
 mkdir -p "$HOME/bin"
 
+FRUGALITY_PY="$PROJECT_DIR/frugality.py"
+
+# Generate frugal-claude wrapper with hardcoded path
+cat > "$HOME/bin/frugal-claude" << 'WRAPPER_EOF'
+#!/usr/bin/env bash
+
+if ! command -v python3 &> /dev/null; then
+    echo "Error: python3 is required but not installed."
+    echo "Please install Python 3 and try again."
+    exit 1
+fi
+
+WRAPPER_EOF
+echo "FRUGALITY_PY=\"$FRUGALITY_PY\"" >> "$HOME/bin/frugal-claude"
+cat >> "$HOME/bin/frugal-claude" << 'WRAPPER_EOF'
+
+if [ ! -f "$FRUGALITY_PY" ]; then
+    echo "Error: frugality.py not found at $FRUGALITY_PY"
+    echo "Please ensure Frugality is installed correctly."
+    exit 1
+fi
+
+echo "Running Frugality configuration..."
+python3 "$FRUGALITY_PY"
+FRUGALITY_EXIT=$?
+
+if [ $FRUGALITY_EXIT -ne 0 ]; then
+    echo "Error: Frugality configuration failed."
+    exit $FRUGALITY_EXIT
+fi
+
+if command -v ccr &> /dev/null; then
+    CCR_STATUS=$(ccr status 2>/dev/null)
+
+    if echo "$CCR_STATUS" | grep -q "running\|started"; then
+        echo "Restarting CCR with new model config..."
+        ccr restart &
+        RESTART_PID=$!
+
+        for i in {1..8}; do
+            sleep 2
+            if curl -s http://localhost:3456 > /dev/null 2>&1; then
+                echo "CCR restarted with new model config."
+                break
+            fi
+            if [ $i -eq 8 ]; then
+                echo "Warning: CCR restart timed out. Config updated but routing may use old models until CCR recovers."
+            fi
+        done
+    else
+        echo "Starting CCR..."
+        ccr start &
+        RESTART_PID=$!
+
+        for i in {1..5}; do
+            sleep 2
+            if curl -s http://localhost:3456 > /dev/null 2>&1; then
+                echo "CCR started successfully."
+                break
+            fi
+            if [ $i -eq 5 ]; then
+                echo "Warning: CCR failed to start. You may need to start it manually."
+            fi
+        done
+    fi
+fi
+
+exec claude "$@"
+WRAPPER_EOF
+
+# Generate frugal-opencode wrapper with hardcoded path
+cat > "$HOME/bin/frugal-opencode" << 'WRAPPER_EOF'
+#!/usr/bin/env bash
+
+if ! command -v python3 &> /dev/null; then
+    echo "Error: python3 is required but not installed."
+    echo "Please install Python 3 and try again."
+    exit 1
+fi
+
+WRAPPER_EOF
+echo "FRUGALITY_PY=\"$FRUGALITY_PY\"" >> "$HOME/bin/frugal-opencode"
+cat >> "$HOME/bin/frugal-opencode" << 'WRAPPER_EOF'
+
+if [ ! -f "$FRUGALITY_PY" ]; then
+    echo "Error: frugality.py not found at $FRUGALITY_PY"
+    echo "Please ensure Frugality is installed correctly."
+    exit 1
+fi
+
+echo "Running Frugality configuration..."
+python3 "$FRUGALITY_PY" --opencode
+FRUGALITY_EXIT=$?
+
+if [ $FRUGALITY_EXIT -ne 0 ]; then
+    echo "Error: Frugality configuration failed."
+    exit $FRUGALITY_EXIT
+fi
+
+exec opencode "$@"
+WRAPPER_EOF
+
+chmod +x "$HOME/bin/frugal-claude"
+chmod +x "$HOME/bin/frugal-opencode"
+
+echo "✓ Wrappers created in ~/bin/"
+
 # Check if ~/bin is in PATH
-if [[ ":$PATH:" == *":$HOME/bin:"* ]]; then
-    echo "Creating symlinks in ~/bin..."
-    ln -sf "$PROJECT_DIR/bin/frugal-claude" "$HOME/bin/frugal-claude"
-    ln -sf "$PROJECT_DIR/bin/frugal-opencode" "$HOME/bin/frugal-opencode"
-    echo "✓ Symlinks created"
-    echo ""
-    echo "Commands available: frugal-claude, frugal-opencode"
-else
-    echo "Creating symlinks in ~/bin..."
-    ln -sf "$PROJECT_DIR/bin/frugal-claude" "$HOME/bin/frugal-claude"
-    ln -sf "$PROJECT_DIR/bin/frugal-opencode" "$HOME/bin/frugal-opencode"
-    echo "✓ Symlinks created in ~/bin/"
+if [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
     echo ""
     echo "⚠ Warning: ~/bin is not in your PATH"
     echo ""
     echo "Add the following to your ~/.bashrc or ~/.zshrc:"
     echo ""
-    echo "  export PATH=\"\$PATH:$HOME/bin\""
+    echo " export PATH=\"\$PATH:$HOME/bin\""
     echo ""
     echo "Then run: source ~/.bashrc (or ~/.zshrc)"
 fi
