@@ -1,4 +1,26 @@
 #!/usr/bin/env bash
-# Launch OpenCode with best S-tier model
-# free-coding-models handles config automatically
-exec free-coding-models --opencode --tier S "$@"
+
+if ! command -v python3 &> /dev/null; then
+    echo "Error: python3 is required but not installed."
+    echo "Please install Python 3 and try again."
+    exit 1
+fi
+
+FRUGALITY_PY="/home/onehottake/frugality/frugality.py"
+
+if [ ! -f "$FRUGALITY_PY" ]; then
+    echo "Error: frugality.py not found at $FRUGALITY_PY"
+    echo "Please ensure Frugality is installed correctly."
+    exit 1
+fi
+
+echo "Running Frugality configuration..."
+python3 "$FRUGALITY_PY" --opencode
+FRUGALITY_EXIT=$?
+
+if [ $FRUGALITY_EXIT -ne 0 ]; then
+    echo "Error: Frugality configuration failed."
+    exit $FRUGALITY_EXIT
+fi
+
+exec opencode "$@"

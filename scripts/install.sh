@@ -164,6 +164,7 @@ if command -v ccr &> /dev/null; then
     fi
 fi
 
+export ANTHROPIC_BASE_URL="http://127.0.0.1:3456"
 exec claude "$@"
 WRAPPER_EOF
 
