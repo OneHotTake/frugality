@@ -3,6 +3,7 @@ import argparse
 import json
 import logging
 import os
+import random
 import subprocess
 import sys
 import tempfile
@@ -21,13 +22,14 @@ CACHE_FILE = os.path.join(CACHE_DIR, "last-known-good.json")
 CERT_REGISTRY_FILE = os.path.join(CACHE_DIR, "certified_models.json")
 
 CERT_SCHEMA_VERSION = 1
-PROBE_VERSION = 1
+PROBE_VERSION = 2  # Incremented: forces recertification on next --refresh
 PROBE_PROFILE = "tool_chat"
 CERT_TTL_DAYS = 7
 PROBE_TIMEOUT = 15
-PROBE_WORKERS = 4
+PROBE_WORKERS = 2  # Reduced from 4 to reduce request rate
 PROBE_MAX_RETRIES = 2
 PROBE_RETRY_DELAY = 2.0
+PROBE_PROVIDER_DELAY = 0.2  # 200ms delay between requests to same provider
 
 ECHO_TOOL = {
     "type": "function",
@@ -315,14 +317,24 @@ def _make_chat_request(url: str, api_key: str, payload: dict) -> dict:
 
 
 def _make_chat_request_with_retry(url: str, api_key: str, payload: dict) -> dict:
-    """Retry on transient 429/5xx up to PROBE_MAX_RETRIES times."""
+    """
+    Retry on transient 429/5xx errors with exponential backoff and jitter.
+    For 429 (rate limit), use longer backoffs: 2s, 4s, 8s + jitter.
+    """
     last_exc = None
     for attempt in range(PROBE_MAX_RETRIES + 1):
         try:
             return _make_chat_request(url, api_key, payload)
         except urllib.error.HTTPError as e:
             if e.code in (429, 500, 502, 503, 504) and attempt < PROBE_MAX_RETRIES:
-                time.sleep(PROBE_RETRY_DELAY * (attempt + 1))
+                # Exponential backoff: 2s, 4s, 8s + random jitter 0-0.5s
+                base_delay = PROBE_RETRY_DELAY * (2 ** attempt)
+                jitter = random.uniform(0, 0.5)
+                delay = base_delay + jitter
+                if e.code == 429:
+                    delay *= 2  # Extra delay for rate limits
+                logger.debug(f"Retry attempt {attempt + 1} after {delay:.2f}s (error {e.code})")
+                time.sleep(delay)
                 last_exc = e
                 continue
             raise
@@ -455,10 +467,18 @@ def _parse_context_tokens(context_str: str) -> int:
         return 0
 
 
+# MARKER_START_RUN_PROBES
 def run_probes(candidates: list, registry: dict, credentials: dict) -> dict:
     """
-    Determine which candidates need probing, run concurrently,
+    Determine which candidates need probing, run with provider-aware concurrency,
     merge results into registry. Returns updated registry.
+
+    Provider-aware concurrency:
+    - Groups candidates by provider
+    - Processes each provider's models sequentially (max 1 concurrent request per provider)
+    - Adds PROBE_PROVIDER_DELAY between requests to same provider
+    - Uses PROBE_WORKERS to parallelize across different providers
+    - This prevents hammering the same provider with parallel requests
     """
     to_probe = []
     for m in candidates:
@@ -475,25 +495,26 @@ def run_probes(candidates: list, registry: dict, credentials: dict) -> dict:
         to_probe.append(m)
 
     if not to_probe:
-        print("  All candidates have fresh certifications — nothing to probe.")
+        print(" All candidates have fresh certifications — nothing to probe.")
         return registry
 
-    print(f"  Probing {len(to_probe)} candidate(s) (workers={PROBE_WORKERS})...")
+    print(f" Probing {len(to_probe)} candidate(s) (workers={PROBE_WORKERS}, provider-aware)...")
 
-    futures = {}
-    with ThreadPoolExecutor(max_workers=PROBE_WORKERS) as pool:
-        for m in to_probe:
-            provider = m.get("provider", "")
+    # Group candidates by provider for provider-aware concurrency
+    by_provider = {}
+    for m in to_probe:
+        provider = normalize_provider(m.get("provider", ""))
+        by_provider.setdefault(provider, []).append(m)
+
+    # Process each provider group with delays
+    def _process_provider(provider_name: str, models: list) -> list:
+        """Process all models for a single provider sequentially with delays."""
+        results = []
+        for idx, m in enumerate(models):
+            if idx > 0:
+                time.sleep(PROBE_PROVIDER_DELAY)
             model_id = m.get("modelId", "")
-            f = pool.submit(probe_model, provider, model_id, credentials)
-            futures[f] = m
-
-        for f in as_completed(futures):
-            m = futures[f]
-            provider = normalize_provider(m.get("provider", ""))
-            model_id = normalize_model_id(m.get("modelId", ""))
-            key = registry_key(provider, model_id)
-            result = f.result()
+            result = probe_model(provider_name, model_id, credentials)
             # Merge discovery metadata into result
             result["tier"] = m.get("tier", "")
             result["context"] = m.get("context", "0")
@@ -501,16 +522,34 @@ def run_probes(candidates: list, registry: dict, credentials: dict) -> dict:
             result["sweScore"] = m.get("sweScore", "")
             result["uptime"] = m.get("uptime", 100)
             result["label"] = m.get("label", model_id)
-            registry["models"][key] = result
-
+            results.append((m, result))
             status_str = {
                 "certified": "OK",
                 "skipped": f"SKIPPED ({result.get('failure_reason', '?')})",
             }.get(result["status"], f"FAIL ({result.get('failure_reason', '?')})")
-            print(f"  {provider}/{model_id}: {status_str}")
+            print(f" {provider_name}/{model_id}: {status_str}")
+        return results
+
+    # Use ThreadPoolExecutor to parallelize across providers
+    with ThreadPoolExecutor(max_workers=PROBE_WORKERS) as pool:
+        futures = {}
+        for provider, models in by_provider.items():
+            f = pool.submit(_process_provider, provider, models)
+            futures[f] = provider
+
+        for f in as_completed(futures):
+            provider = futures[f]
+            try:
+                provider_results = f.result()
+                for (m, result) in provider_results:
+                    p = normalize_provider(m.get("provider", ""))
+                    model_id = normalize_model_id(m.get("modelId", ""))
+                    key = registry_key(p, model_id)
+                    registry["models"][key] = result
+            except Exception as e:
+                logger.error(f"Error processing provider {provider}: {e}")
 
     return registry
-
 
 def map_tiers(models):
     routes = {"default": None, "background": None, "think": None, "longContext": None}
