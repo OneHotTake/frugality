@@ -48,6 +48,27 @@ else
     echo "✓ free-coding-models already installed"
 fi
 
+# Auto-update provider URLs from free-coding-models
+echo ""
+echo "=========================================="
+echo " Syncing Provider URLs"
+echo "=========================================="
+echo ""
+echo "Extracting provider endpoints from free-coding-models..."
+node "$SCRIPT_DIR/extract-provider-urls.js" > /tmp/provider-urls.json
+if [ $? -eq 0 ]; then
+    echo "✓ Extracted provider URLs"
+    echo "Updating frugality.py..."
+    python3 "$SCRIPT_DIR/update-provider-urls.py" /tmp/provider-urls.json
+    if [ $? -eq 0 ]; then
+        echo "✓ Updated provider URLs in frugality.py"
+    else
+        echo "⚠ Warning: Failed to update provider URLs"
+    fi
+else
+    echo "⚠ Warning: Failed to extract provider URLs"
+fi
+
 # Install Claude Code Router if not already installed
 if ! command -v ccr &> /dev/null; then
     echo "Installing Claude Code Router..."
@@ -272,89 +293,3 @@ exec claude "$@"
 WRAPPER_EOF
 
 # Generate frugal-opencode wrapper with hardcoded path
-cat > "$HOME/bin/frugal-opencode" << 'WRAPPER_EOF'
-#!/usr/bin/env bash
-
-if ! command -v python3 &> /dev/null; then
-    echo "Error: python3 is required but not installed."
-    echo "Please install Python 3 and try again."
-    exit 1
-fi
-
-WRAPPER_EOF
-echo "FRUGALITY_PY=\"$FRUGALITY_PY\"" >> "$HOME/bin/frugal-opencode"
-cat >> "$HOME/bin/frugal-opencode" << 'WRAPPER_EOF'
-
-if [ ! -f "$FRUGALITY_PY" ]; then
-    echo "Error: frugality.py not found at $FRUGALITY_PY"
-    echo "Please ensure Frugality is installed correctly."
-    exit 1
-fi
-
-echo "Running Frugality configuration..."
-python3 "$FRUGALITY_PY" --opencode
-FRUGALITY_EXIT=$?
-
-if [ $FRUGALITY_EXIT -ne 0 ]; then
-    echo "Error: Frugality configuration failed."
-    exit $FRUGALITY_EXIT
-fi
-
-exec opencode "$@"
-WRAPPER_EOF
-
-chmod +x "$HOME/bin/frugal-claude"
-chmod +x "$HOME/bin/frugal-opencode"
-
-echo "✓ Wrappers created in ~/bin/"
-
-# Check if ~/bin is in PATH
-if [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
-    echo ""
-    echo "⚠ Warning: ~/bin is not in your PATH"
-    echo ""
-    echo "Add the following to your ~/.bashrc or ~/.zshrc:"
-    echo ""
-    echo " export PATH=\"\$PATH:$HOME/bin\""
-    echo ""
-    echo "Then run: source ~/.bashrc (or ~/.zshrc)"
-fi
-
-# Run free-coding-models to ensure model cache is populated
-echo ""
-echo "=========================================="
-echo " Running Free-Coding-Models Discovery"
-echo "=========================================="
-echo ""
-
-echo "Discovering available models..."
-free-coding-models --json --hide-unconfigured > /dev/null
-echo "✓ Model discovery complete"
-
-# Run initial configuration with refresh to populate cert registry
-echo ""
-echo "=========================================="
-echo " Running Initial Configuration"
-echo "=========================================="
-echo ""
-
-cd "$PROJECT_DIR"
-python3 frugality.py --refresh
-
-# Start CCR if not running
-echo ""
-echo "Starting Claude Code Router..."
-ccr start || echo "Note: CCR may already be running or installed differently"
-
-echo ""
-echo "=========================================="
-echo "  Installation Complete!"
-echo "=========================================="
-echo ""
-echo "Next steps:"
-echo "  1. Configure your API keys in ~/.free-coding-models.json"
-echo "  2. Run 'frugal-claude' to start Claude Code with routing"
-echo "  3. Or run 'frugal-opencode' to start OpenCode"
-echo ""
-echo "For more info, see: $PROJECT_DIR/README.md"
-echo ""
