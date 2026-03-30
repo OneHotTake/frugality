@@ -216,10 +216,21 @@ if [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
     echo "Then run: source ~/.bashrc (or ~/.zshrc)"
 fi
 
+# Run free-coding-models to ensure model cache is populated
+echo ""
+echo "=========================================="
+echo " Running Free-Coding-Models Discovery"
+echo "=========================================="
+echo ""
+
+echo "Discovering available models..."
+free-coding-models --json --hide-unconfigured > /dev/null
+echo "✓ Model discovery complete"
+
 # Run initial configuration
 echo ""
 echo "=========================================="
-echo "  Running Initial Configuration"
+echo " Running Initial Configuration"
 echo "=========================================="
 echo ""
 
