@@ -4,7 +4,12 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import tempfile
+import time
+import urllib.error
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -13,6 +18,29 @@ FCM_CONFIG_PATH = os.path.join(HOME, ".free-coding-models.json")
 CCR_CONFIG_PATH = os.path.join(HOME, ".claude-code-router", "config.json")
 CACHE_DIR = os.path.join(HOME, ".frugality", "cache")
 CACHE_FILE = os.path.join(CACHE_DIR, "last-known-good.json")
+CERT_REGISTRY_FILE = os.path.join(CACHE_DIR, "certified_models.json")
+
+CERT_SCHEMA_VERSION = 1
+PROBE_VERSION = 1
+PROBE_PROFILE = "tool_chat"
+CERT_TTL_DAYS = 7
+PROBE_TIMEOUT = 15
+PROBE_WORKERS = 4
+PROBE_MAX_RETRIES = 2
+PROBE_RETRY_DELAY = 2.0
+
+ECHO_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "echo_number",
+        "description": "Echo a number back",
+        "parameters": {
+            "type": "object",
+            "properties": {"value": {"type": "integer"}},
+            "required": ["value"],
+        },
+    },
+}
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -104,6 +132,77 @@ def save_cache(models):
         logger.debug(f"Saved {len(models)} models to cache")
     except Exception as e:
         logger.warning(f"Failed to save cache: {e}")
+
+
+def normalize_provider(provider: str) -> str:
+    return provider.strip().lower()
+
+
+def normalize_model_id(model_id: str) -> str:
+    return model_id.strip()
+
+
+def registry_key(provider: str, model_id: str) -> str:
+    return f"{normalize_provider(provider)},{normalize_model_id(model_id)}"
+
+
+def load_registry() -> dict:
+    """Load cert registry. Returns empty registry on missing/corrupt/version-mismatch."""
+    empty = {
+        "schema_version": CERT_SCHEMA_VERSION,
+        "probe_version": PROBE_VERSION,
+        "updated_at": "",
+        "models": {},
+    }
+    if not os.path.exists(CERT_REGISTRY_FILE):
+        return empty
+    try:
+        with open(CERT_REGISTRY_FILE) as f:
+            data = json.load(f)
+        if data.get("schema_version") != CERT_SCHEMA_VERSION:
+            logger.warning("Registry schema version mismatch — treating as empty")
+            return empty
+        return data
+    except Exception:
+        return empty
+
+
+def save_registry(registry: dict) -> None:
+    registry["updated_at"] = datetime.now().isoformat()
+    registry["probe_version"] = PROBE_VERSION
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    atomic_write_json(CERT_REGISTRY_FILE, registry)
+
+
+def is_cert_stale(entry: dict) -> bool:
+    """Stale if timestamp too old OR probe_version outdated."""
+    if entry.get("probe_version", 0) < PROBE_VERSION:
+        return True
+    try:
+        verified = datetime.fromisoformat(entry.get("last_verified_at", "2000-01-01"))
+        return datetime.now() - verified > timedelta(days=CERT_TTL_DAYS)
+    except Exception:
+        return True
+
+
+def get_certified_models(registry: dict) -> list:
+    """Return FCM-shaped model dicts for all certified entries."""
+    result = []
+    for entry in registry.get("models", {}).values():
+        if entry.get("status") != "certified":
+            continue
+        result.append(
+            {
+                "modelId": entry["model_id"],
+                "provider": entry["provider"],
+                "tier": entry.get("tier", "S"),
+                "context": entry.get("context", "0"),
+                "sweScore": entry.get("sweScore", ""),
+                "uptime": entry.get("uptime", 100),
+                "label": entry.get("label", entry["model_id"]),
+            }
+        )
+    return result
 
 
 def get_fcm_data():
@@ -199,6 +298,220 @@ def get_api_key(credentials, provider):
     return ""
 
 
+def _make_chat_request(url: str, api_key: str, payload: dict) -> dict:
+    """POST payload to url. Returns parsed JSON response. Raises on network or HTTP error."""
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=PROBE_TIMEOUT) as resp:
+        return json.loads(resp.read().decode())
+
+
+def _make_chat_request_with_retry(url: str, api_key: str, payload: dict) -> dict:
+    """Retry on transient 429/5xx up to PROBE_MAX_RETRIES times."""
+    last_exc = None
+    for attempt in range(PROBE_MAX_RETRIES + 1):
+        try:
+            return _make_chat_request(url, api_key, payload)
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 502, 503, 504) and attempt < PROBE_MAX_RETRIES:
+                time.sleep(PROBE_RETRY_DELAY * (attempt + 1))
+                last_exc = e
+                continue
+            raise
+    raise last_exc
+
+
+def probe_model(provider: str, model_id: str, credentials: dict) -> dict:
+    """
+    Certification probe for profile 'tool_chat'.
+    Step 1+2: Send tool-call request → verify echo_number(value=7) emitted
+    Step 3:   Send tool result → verify final text answer contains "49"
+    Returns a registry entry dict (no tier/context metadata — caller adds those).
+    """
+    url = PROVIDER_BASE_URLS.get(
+        normalize_provider(provider), "https://api.openai.com/v1/chat/completions"
+    )
+    api_key = get_api_key(credentials, provider)
+
+    base_entry = {
+        "status": "failed",
+        "probe_version": PROBE_VERSION,
+        "probe_profile": PROBE_PROFILE,
+        "provider": normalize_provider(provider),
+        "model_id": normalize_model_id(model_id),
+        "capabilities": {
+            "tool_calling": False,
+            "tool_roundtrip": False,
+            "valid_json_args": False,
+        },
+        "failure_reason": None,
+        "last_verified_at": datetime.now().isoformat(),
+    }
+
+    # Skip if no credentials
+    if not api_key:
+        return {**base_entry, "status": "skipped", "failure_reason": "no_credentials"}
+
+    # Step 1+2: Tool call emission
+    try:
+        resp = _make_chat_request_with_retry(
+            url,
+            api_key,
+            {
+                "model": model_id,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Call echo_number with value 7. Do not answer directly.",
+                    }
+                ],
+                "tools": [ECHO_TOOL],
+                "tool_choice": "required",
+            },
+        )
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            return {
+                **base_entry,
+                "status": "skipped",
+                "failure_reason": f"auth_error:{e.code}",
+            }
+        return {**base_entry, "failure_reason": f"http_error:{e.code}"}
+    except urllib.error.URLError as e:
+        return {**base_entry, "status": "skipped", "failure_reason": f"connectivity:{e.reason}"}
+    except Exception as e:
+        return {**base_entry, "failure_reason": f"request_error:{e}"}
+
+    try:
+        choice = resp["choices"][0]["message"]
+        tool_calls = choice.get("tool_calls") or []
+        if not tool_calls:
+            return {**base_entry, "failure_reason": "no_tool_call"}
+        tc = tool_calls[0]
+        if tc["function"]["name"] != "echo_number":
+            return {
+                **base_entry,
+                "failure_reason": f"wrong_tool_name:{tc['function']['name']}",
+            }
+        args = json.loads(tc["function"]["arguments"])
+        if args.get("value") != 7:
+            return {**base_entry, "failure_reason": f"bad_args:value={args.get('value')}"}
+    except Exception as e:
+        return {**base_entry, "failure_reason": f"parse_error:{e}"}
+
+    base_entry["capabilities"]["tool_calling"] = True
+    base_entry["capabilities"]["valid_json_args"] = True
+
+    # Step 3: Tool roundtrip
+    tool_call_id = tool_calls[0].get("id", "call_test_1")
+    try:
+        resp2 = _make_chat_request_with_retry(
+            url,
+            api_key,
+            {
+                "model": model_id,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Call echo_number with value 7. Do not answer directly.",
+                    },
+                    {"role": "assistant", "tool_calls": [tool_calls[0]]},
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": json.dumps({"ok": True, "value": 49}),
+                    },
+                ],
+            },
+        )
+        final = resp2["choices"][0]["message"]
+        if final.get("tool_calls"):
+            return {**base_entry, "failure_reason": "tool_loop"}
+        content = final.get("content") or ""
+        if not content:
+            return {**base_entry, "failure_reason": "empty_final_response"}
+        # Verify model actually consumed the tool result (must reference "49")
+        if "49" not in content:
+            return {**base_entry, "failure_reason": "roundtrip_result_ignored"}
+    except Exception as e:
+        return {**base_entry, "failure_reason": f"roundtrip_error:{e}"}
+
+    base_entry["capabilities"]["tool_roundtrip"] = True
+    return {**base_entry, "status": "certified"}
+
+
+def _parse_context_tokens(context_str: str) -> int:
+    try:
+        return int(context_str.replace("k", "000").replace("M", "000000") or "0")
+    except Exception:
+        return 0
+
+
+def run_probes(candidates: list, registry: dict, credentials: dict) -> dict:
+    """
+    Determine which candidates need probing, run concurrently,
+    merge results into registry. Returns updated registry.
+    """
+    to_probe = []
+    for m in candidates:
+        provider = normalize_provider(m.get("provider", ""))
+        model_id = normalize_model_id(m.get("modelId", ""))
+        if not provider or not model_id:
+            continue
+        key = registry_key(provider, model_id)
+        existing = registry["models"].get(key, {})
+        if existing.get("status") == "blocked":
+            continue  # never re-probe blocked models
+        if existing.get("status") == "certified" and not is_cert_stale(existing):
+            continue  # fresh cert, skip
+        to_probe.append(m)
+
+    if not to_probe:
+        print("  All candidates have fresh certifications — nothing to probe.")
+        return registry
+
+    print(f"  Probing {len(to_probe)} candidate(s) (workers={PROBE_WORKERS})...")
+
+    futures = {}
+    with ThreadPoolExecutor(max_workers=PROBE_WORKERS) as pool:
+        for m in to_probe:
+            provider = m.get("provider", "")
+            model_id = m.get("modelId", "")
+            f = pool.submit(probe_model, provider, model_id, credentials)
+            futures[f] = m
+
+        for f in as_completed(futures):
+            m = futures[f]
+            provider = normalize_provider(m.get("provider", ""))
+            model_id = normalize_model_id(m.get("modelId", ""))
+            key = registry_key(provider, model_id)
+            result = f.result()
+            # Merge discovery metadata into result
+            result["tier"] = m.get("tier", "")
+            result["context"] = m.get("context", "0")
+            result["context_tokens"] = _parse_context_tokens(m.get("context", "0"))
+            result["sweScore"] = m.get("sweScore", "")
+            result["uptime"] = m.get("uptime", 100)
+            result["label"] = m.get("label", model_id)
+            registry["models"][key] = result
+
+            status_str = {
+                "certified": "OK",
+                "skipped": f"SKIPPED ({result.get('failure_reason', '?')})",
+            }.get(result["status"], f"FAIL ({result.get('failure_reason', '?')})")
+            print(f"  {provider}/{model_id}: {status_str}")
+
+    return registry
+
+
 def map_tiers(models):
     routes = {"default": None, "background": None, "think": None, "longContext": None}
 
@@ -276,47 +589,58 @@ def print_selection_summary(selected):
             logger.info(f"  {role:12} → (none selected)")
 
 
-def update_ccr_config():
+def update_ccr_config(models: list, credentials: dict) -> bool:
     logger.info("Configuring Claude Code Router")
-
-    credentials = get_fcm_credentials()
-    models = get_fcm_data_with_cache()
-
-    if not models:
-        return False
-
-    logger.info(f"Discovered {len(models)} models")
-
     selected = map_tiers(models)
-
     if not selected["default"]:
-        logger.error("No suitable models found")
+        logger.error("No suitable models found for default route")
         return False
-
     print_selection_summary(selected)
-
     providers = build_provider_config(models, credentials)
-
     router_config = {}
     for role, model_data in selected.items():
         if model_data:
             model_id = model_data["modelId"]
             provider = model_data.get("provider", "")
-            if provider:
-                router_config[role] = f"{provider},{model_id}"
-            else:
-                router_config[role] = model_id
-
+            router_config[role] = f"{provider},{model_id}" if provider else model_id
     ccr_config = {"Providers": providers, "Router": router_config}
-
     try:
         atomic_write_json(CCR_CONFIG_PATH, ccr_config)
         logger.info(f"Updated CCR config at {CCR_CONFIG_PATH}")
+        return True
     except Exception as e:
         logger.error(f"Failed to write config: {e}")
         return False
 
-    return True
+
+def run_default_mode(credentials: dict) -> bool:
+    print("Using certified model registry")
+    registry = load_registry()
+    certified = get_certified_models(registry)
+    if not certified:
+        print("ERROR: No certified models found.")
+        print("Run 'frugal-claude --refresh' to discover and certify models.")
+        return False
+    print(f"  {len(certified)} certified model(s) available")
+    return update_ccr_config(certified, credentials)
+
+
+def run_refresh_mode(credentials: dict) -> bool:
+    print("Refresh requested — discovering candidates from free-coding-models")
+    candidates = get_fcm_data_with_cache()
+    if not candidates:
+        return False
+    print(f"  Discovered {len(candidates)} candidate(s)")
+    registry = load_registry()
+    registry = run_probes(candidates, registry, credentials)
+    save_registry(registry)
+    certified = get_certified_models(registry)
+    print(f"  Certified {len(certified)}/{len(candidates)} models")
+    if not certified:
+        print("ERROR: No models passed certification.")
+        print("Check API keys and provider availability.")
+        return False
+    return update_ccr_config(certified, credentials)
 
 
 if __name__ == "__main__":
@@ -327,13 +651,18 @@ if __name__ == "__main__":
         "-v", "--verbose", action="store_true", help="Enable debug output"
     )
     parser.add_argument("-q", "--quiet", action="store_true", help="Only show errors")
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Discover and certify candidate models, then update CCR config",
+    )
+    parser.add_argument(
+        "--opencode", action="store_true", help="Write OpenCode config (not yet implemented)"
+    )
     args = parser.parse_args()
-
     setup_logging(args.verbose, args.quiet)
-
-    success = update_ccr_config()
+    credentials = get_fcm_credentials()
+    success = run_refresh_mode(credentials) if args.refresh else run_default_mode(credentials)
     if success:
         logger.info("Configuration complete")
-        exit(0)
-    else:
-        exit(1)
+    sys.exit(0 if success else 1)

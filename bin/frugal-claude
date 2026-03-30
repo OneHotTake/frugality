@@ -3,6 +3,7 @@
 # Command line flags
 FLAG_CONNECT=0
 FLAG_RESTART=0
+FLAG_REFRESH=0
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -13,6 +14,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --restart|--force)
             FLAG_RESTART=1
+            shift
+            ;;
+        --refresh)
+            FLAG_REFRESH=1
             shift
             ;;
         *)
@@ -61,7 +66,9 @@ if [ $FLAG_CONNECT -eq 1 ]; then
 elif [ $FLAG_RESTART -eq 1 ]; then
     # Restart mode: update config and restart
     echo "Updating configuration and restarting CCR..."
-    python3 "$FRUGALITY_PY"
+    FRUGALITY_ARGS=""
+    [ $FLAG_REFRESH -eq 1 ] && FRUGALITY_ARGS="--refresh"
+    python3 "$FRUGALITY_PY" $FRUGALITY_ARGS
     if [ $? -ne 0 ]; then
         echo "Error: Configuration update failed."
         exit 1
@@ -107,7 +114,9 @@ elif [ $CCR_RUNNING -eq 1 ]; then
             ;;
         2|*)
             echo "Updating configuration and restarting CCR..."
-            python3 "$FRUGALITY_PY"
+            FRUGALITY_ARGS=""
+            [ $FLAG_REFRESH -eq 1 ] && FRUGALITY_ARGS="--refresh"
+            python3 "$FRUGALITY_PY" $FRUGALITY_ARGS
             if [ $? -ne 0 ]; then
                 echo "Error: Configuration update failed."
                 exit 1
@@ -120,7 +129,9 @@ elif [ $CCR_RUNNING -eq 1 ]; then
 else
     # CCR not running - normal startup
     echo "Running Frugality configuration..."
-    python3 "$FRUGALITY_PY"
+    FRUGALITY_ARGS=""
+    [ $FLAG_REFRESH -eq 1 ] && FRUGALITY_ARGS="--refresh"
+    python3 "$FRUGALITY_PY" $FRUGALITY_ARGS
     FRUGALITY_EXIT=$?
 
     if [ $FRUGALITY_EXIT -ne 0 ]; then
