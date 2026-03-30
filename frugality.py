@@ -582,11 +582,22 @@ def print_selection_summary(selected):
         model_data = selected.get(role)
         if model_data:
             model_id = model_data.get("modelId", "unknown")
+            provider = model_data.get("provider", "unknown")
             tier = model_data.get("tier", "unknown")
+            context = model_data.get("context", "unknown")
             uptime = model_data.get("uptime", "unknown")
-            logger.info(f"  {role:12} → {model_id} ({tier}-tier, {uptime}% uptime)")
+            logger.info(f"  {role:12} → {provider:15} / {model_id}")
+            logger.info(f"                 {tier:3}-tier | {context:>8} context | {uptime}% uptime")
         else:
             logger.info(f"  {role:12} → (none selected)")
+
+def print_provider_details(credentials):
+    """Print configured provider endpoints."""
+    logger.info("Provider endpoints:")
+    for provider, base_url in sorted(PROVIDER_BASE_URLS.items()):
+        api_key = get_api_key(credentials, provider)
+        status = "✓ configured" if api_key else "⊘ unconfigured"
+        logger.info(f"  {provider:15} {status:20} {base_url}")
 
 
 def update_ccr_config(models: list, credentials: dict) -> bool:
@@ -622,6 +633,9 @@ def run_default_mode(credentials: dict) -> bool:
         print("Run 'frugal-claude --refresh' to discover and certify models.")
         return False
     print(f"  {len(certified)} certified model(s) available")
+    print()
+    print_provider_details(credentials)
+    print()
     return update_ccr_config(certified, credentials)
 
 
