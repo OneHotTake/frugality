@@ -17,7 +17,13 @@ The flow is: `frugal-claude` / `frugal-opencode` wrapper scripts → `frugality.
 4. Builds provider configs using API keys from `~/.free-coding-models.json`
 5. Atomically writes `~/.claude-code-router/config.json` (temp file + rename)
 
-**`bin/frugal-claude`**: calls `frugality.py`, restarts CCR (polls `localhost:3456` health, 8 retries × 2s), then `exec claude`.
+**`bin/frugal-claude`**: Smart CCR wrapper that:
+- Accepts `--connect` to skip config generation and connect to existing instance
+- Accepts `--restart` / `--force` to update config and restart CCR
+- When CCR is already running with no flags, shows interactive prompt recommending action based on config age (<5 min = connect; >5 min = restart with 5s timeout, defaults to recommendation)
+- When CCR is not running, runs config generation and starts CCR
+- Polls `localhost:3456` health check (8 retries × 2s) before launching claude
+- Sets `ANTHROPIC_BASE_URL="http://127.0.0.1:3456"` and execs `claude`
 
 **`bin/frugal-opencode`**: calls `frugality.py --opencode`, then `exec opencode`.
 
@@ -48,6 +54,12 @@ tail -f ~/.claude-code-router/logs/ccr-*.log
 
 # Re-run install (regenerates wrapper scripts with current path)
 bash scripts/install.sh
+
+# Frugal-Claude usage
+frugal-claude                 # Interactive prompt if CCR running, otherwise normal startup
+frugal-claude --connect       # Connect to existing instance without restart
+frugal-claude --restart       # Update config and restart CCR (skip prompt)
+frugal-claude --force         # Alias for --restart
 ```
 
 ## Model Tier Reference
