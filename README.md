@@ -2,293 +2,83 @@
 
 > Claude Code. Free models. Zero compromise.
 
-Cost-optimized AI development using free-tier models for Claude Code and OpenCode.
+Claude Code is the best AI coding agent out there. It's also expensive when it's reading files, searching code, and doing background busywork. Frugality fixes that — it auto-discovers the best free-tier models and routes the boring stuff there, so Claude's quota goes toward the things only Claude can do.
 
-Claude Code is the best AI coding agent available. But every background task,
-test generation, and boilerplate call burns your API quota. Frugality fixes that
-by automatically routing those calls to free-tier models — so Claude stays sharp
-for the decisions only Claude can make.
+## How it works
 
-## Overview
-
-Frugality is a lightweight orchestration tool that automatically discovers and configures the best free-tier AI models for your coding workflow. It integrates with:
-
-- **Claude Code** via Claude Code Router (CCR)
-- **OpenCode** via its native configuration
-
-## Features
-
-- **Automatic Model Discovery**: Queries free-coding-models to find the best available models
-- **Intelligent Routing**: Configures CCR with optimal routes for different task types:
-  - `default` - Best S-tier model for general tasks
-  - `background` - High-uptime A-tier model for lightweight tasks
-  - `think` - Reasoning-heavy model (e.g., DeepSeek-R1)
-  - `longContext` - Models with >32K context window
-- **Atomic Config Updates**: Safe JSON writes prevent corruption
-- **Zero Dependencies**: Pure Python - no external runtime requirements
-
-## Requirements
-
-- Python 3.7+
-- Node.js 18+ (required by free-coding-models)
-- [free-coding-models](https://github.com/vava-nessa/free-coding-models) - Model discovery
-- [Claude Code Router](https://github.com/musistudio/claude-code-router) - For Claude Code routing
-- OpenCode (optional) - For OpenCode integration
-
-## Installation
-
-### 1. Install Dependencies
-
-```bash
-# Install free-coding-models (if not already installed)
-npm install -g free-coding-models
-
-# Install Claude Code Router (if not already installed)  
-npm install -g @musistudio/claude-code-router
-
-# Install Claude Code
-npm install -g @anthropic-ai/claude-code
+```
+frugal-claude
+    ↓
+frugality.py  →  free-coding-models --json  →  map to tiers  →  write CCR config
+    ↓
+ccr restart  →  claude
 ```
 
-### 2. Install Frugality
+Every time you launch, it finds the best available free models and updates [Claude Code Router](https://github.com/musistudio/claude-code-router) automatically. You just type `frugal-claude` instead of `claude`.
+
+## Routing tiers
+
+| Route | Model tier | Used for |
+|-------|-----------|----------|
+| `default` | S-tier (60-70% SWE) | General coding |
+| `background` | A-tier (40-60%) | File reads, searches, busywork |
+| `think` | Reasoning model (R1, etc.) | Plan mode, hard bugs |
+| `longContext` | >32K context | Big files, log analysis |
+
+Claude Code picks the right slot per task. You never touch the config.
+
+## Install
+
+**Prerequisites:** Python 3.7+, Node.js 18+, [Claude Code](https://claude.ai/code)
 
 ```bash
-# Clone the repository
+# 1. Install the model tools
+npm install -g free-coding-models @musistudio/claude-code-router
+
+# 2. Clone and install frugality
 git clone https://github.com/OneHotTake/frugality.git
 cd frugality
-
-# Run the install script
 ./scripts/install.sh
-```
 
-Or manually:
-
-```bash
-# Add bin to your PATH (add to ~/.bashrc or ~/.zshrc)
-export PATH="$PATH:/path/to/frugality/bin"
-
-# Or create symlinks
-sudo ln -s /path/to/frugality/bin/frugal-claude /usr/local/bin/
-sudo ln -s /path/to/frugality/bin/frugal-opencode /usr/local/bin/
-```
-
-### 3. Configure API Keys
-
-**Option A: Automatic (Recommended)**
-
-Run free-coding-models for the first time - it will prompt you to enter API keys for any providers you want to use. Keys are saved automatically to `~/.free-coding-models.json`:
-
-```bash
+# 3. Set up your API keys (interactive)
 free-coding-models
 ```
 
-**Option B: Manual**
-
-Create `~/.free-coding-models.json` with your API keys:
-
-```json
-{
-  "apiKeys": {
-    "nvidia": "nvapi-xxxxxxxx",
-    "groq": "gsk_xxxxxxxx",
-    "openrouter": "sk-or-xxxxx"
-  }
-}
-```
-
-> **Tip:** free-coding-models supports many providers. Run `free-coding-models --help` to see all available options.
-
-## Quick Start
-
-### Using Claude Code
-
-```bash
-# Launch Claude Code with automatic model routing
-frugal-claude
-
-# Or manually run the config first, then launch
-python3 frugality.py
-ccr restart
-claude
-```
-
-### Using OpenCode
-
-```bash
-# Launch OpenCode with best S-tier model
-frugal-opencode
-```
-
-## How Routing Works
-
-Frugality maps free-coding-models tier ratings to CCR route slots:
-
-| CCR Route     | Model Tier | What runs here                          |
-|---------------|------------|-----------------------------------------|
-| default       | S-tier     | General coding tasks                    |
-| background    | A-tier     | File reads, searches, lightweight tasks |
-| think         | S+ w/ reasoning | Plan mode, complex debugging       |
-| longContext   | >32K ctx   | Large file analysis, log review         |
-
-Claude Code automatically uses the right slot per task.
-You never touch the config.
+The installer drops `frugal-claude` and `frugal-opencode` into `~/bin/`. Make sure that's in your `$PATH`.
 
 ## Usage
 
-### Command Wrappers
-
-| Command | Description |
-|---------|-------------|
-| `frugal-claude` | Update CCR config + launch Claude Code |
-| `frugal-opencode` | Update OpenCode config + launch OpenCode |
-
-### Direct Script Usage
-
 ```bash
-# Update CCR configuration only
-python3 frugality.py
-
-# Check CCR status
-ccr status
-
-# Restart CCR to apply new config
-ccr restart
+frugal-claude        # update config + launch Claude Code
+frugal-opencode      # update config + launch OpenCode
+python3 frugality.py # update CCR config only, don't launch anything
 ```
 
-### Model Tier Reference
+## API keys
 
-| Tier | Description | Use Case |
-|------|-------------|----------|
-| S+ (≥70%) | Best of the best | Complex refactors, GitHub issues |
-| S (60-70%) | Strong general use | Primary workhorse |
-| A+/A (40-60%) | Solid alternatives | Secondary tasks |
-| A-/B+ (30-40%) | Smaller tasks | Quick edits, small changes |
-| B/C (<30%) | Code completion | Edge cases, completion |
-
-## Configuration
-
-### CCR Config Location
-
-`~/.claude-code-router/config.json`
-
-Frugality generates this automatically with:
-- `Providers` - List of configured providers with API endpoints
-- `Router` - Model routing rules
-
-### OpenCode Config Location
-
-`~/.config/opencode/opencode.json`
-
-Frugality leverages free-coding-models' built-in OpenCode configuration.
-
-### Frugality Cache
-
-`~/.frugality/`
-- `cache/` - Model discovery cache
-- `logs/` - Operation logs
-
-## How It Works
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Frugality                            │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │           frugality.py                          │   │
-│  │  1. Query free-coding-models --json            │   │
-│  │  2. Map models to routing tiers               │   │
-│  │  3. Generate CCR config (Providers + Router)  │   │
-│  │  4. Atomic JSON write                        │   │
-│  └─────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────┘
-         │                              │
-         ▼                              ▼
-┌──────────────────┐         ┌──────────────────┐
-│ Claude Code      │         │ OpenCode         │
-│ (via CCR)        │         │ (native config)  │
-│                  │         │                  │
-│ ~/.claude-code-  │         │ ~/.config/       │
-│ router/config.json│         │ opencode.json    │
-└──────────────────┘         └──────────────────┘
-```
-
-## Development
-
-```bash
-# Test the configuration script
-python3 frugality.py
-
-# Verify CCR config
-cat ~/.claude-code-router/config.json
-
-# Check CCR is running
-ccr status
-
-# View CCR logs
-tail -f ~/.claude-code-router/logs/ccr-*.log
-```
+Keys live in `~/.free-coding-models.json`. Run `free-coding-models` once and it'll walk you through setup. Frugality supports [16 providers](frugality.py) including Groq, Cerebras, SambaNova, NVIDIA NIM, and OpenRouter.
 
 ## Troubleshooting
 
-### No models found
-
 ```bash
-# Verify free-coding-models works
-free-coding-models --json
+# Nothing working?
+free-coding-models --json          # verify model discovery works
+cat ~/.free-coding-models.json     # verify keys are there
+ccr status                         # verify router is running
+tail -f ~/.claude-code-router/logs/ccr-*.log  # see what CCR is doing
 
-# Check API keys are configured
-cat ~/.free-coding-models.json
-```
-
-### CCR not routing correctly
-
-```bash
-# Restart CCR
-ccr restart
-
-# Check config
-ccr doctor
-```
-
-### OpenCode not using configured model
-
-```bash
-# Use free-coding-models directly
-free-coding-models --opencode --tier S
-```
-
-## Project Structure
-
-```
-frugality/
-├── bin/
-│   ├── frugal-claude      # Claude Code wrapper
-│   └── frugal-opencode   # OpenCode wrapper
-├── .frugality/
-│   ├── cache/            # Model cache
-│   └── logs/             # Logs
-├── frugality.py          # Main orchestration script
-├── opencode.json         # Template OpenCode provider configuration for NVIDIA NIM
-└── README.md             # This file
+# Force fresh model discovery (skip 24h cache)
+rm ~/.frugality/cache/last-known-good.json
 ```
 
 ## Roadmap
 
-- [ ] `--dry-run` flag — preview config changes without writing
-- [ ] `--tier` flag — override default S-tier selection  
-- [ ] Watchdog mode — auto-refresh model when latency degrades
-- [ ] Safe restart — defer CCR restart during active Claude sessions
-- [ ] `frug doctor` — diagnostic command for troubleshooting
-- [ ] claudish integration — sub-agent model selection via skill doc
-- [ ] Community preset library — shareable CCR configurations
-
-Contributions welcome. See [CONTRIBUTING.md] if it exists, or open an issue.
+- `--dry-run` — preview config without writing
+- `--tier` — override model tier selection
+- `frug doctor` — one-command diagnostics
+- Watchdog mode — auto-refresh when a model's latency tanks
+- Safe restart — defer CCR restart during active sessions
 
 ## License
 
 MIT
-
-<!-- 
-TODO: Set GitHub repo metadata:
-Description: Claude Code. Free models. Zero compromise.
-Topics: claude-code, free-tier, ai-coding, opencode, llm-routing, claude-code-router
--->
