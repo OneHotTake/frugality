@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ============================================================
-# frugal-claude — Launch Claude Code via Claudish proxy
+# claude-frugal — Launch Claude Code via Claudish proxy
 # Discovers free-tier models, writes env config, invokes claudish.
 # ============================================================
 

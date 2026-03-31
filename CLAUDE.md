@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # Frugality -- Cost-Optimized AI Development
 
-Frugality discovers available free-tier AI models and configures [Claudish](https://github.com/MadAppGang/claudish) and OpenCode to use them automatically.
+Frugality discovers available free-tier AI models and configures [Claudish](https://github.com/MadAppGang/claudish) to use them automatically.
 
 ## Prerequisites
 
@@ -34,7 +34,7 @@ Frugality enforces a **certification gate** to prevent routing through models th
 
 **Core invariant**: `free-coding-models` produces **candidates**; probing produces **eligibility**; routing uses **certified** models only.
 
-The flow is: `frugal-claude` wrapper -> `frugality.py` -> writes `~/.frugality/current_env.sh` -> sources env -> invokes `claudish --model <model> --interactive`.
+The flow is: `claude-frugal` wrapper -> `frugality.py` -> writes `~/.frugality/current_env.sh` -> sources env -> invokes `claudish --model <model> --interactive`.
 
 **`frugality.py`** is the core engine:
 
@@ -66,21 +66,14 @@ The flow is: `frugal-claude` wrapper -> `frugality.py` -> writes `~/.frugality/c
 
 ### Wrapper Scripts
 
-**`bin/frugal-claude`**: Claudish launcher that:
+**`bin/claude-frugal`**: Claudish launcher that:
 - Checks dependencies at startup (python3, node, claudish, free-coding-models)
 - Runs `frugality.py` for model discovery
 - Sources `~/.frugality/current_env.sh`
 - Invokes `$FRUG_CLAUDISH_INVOCATION --interactive` with pass-through args
 - No restart logic, no daemon management -- Claudish handles protocol compliance
 
-**`bin/frugal-opencode`** (DEPRECATED):
-- Prints deprecation warning
-- Same dependency checks minus claudish
-- Runs frugality.py if env file is missing or >1 hour old
-- Calls `free-coding-models --opencode --tier S` to configure OpenCode
-- Launches `opencode`
-
-**`scripts/install.sh`**: installs npm deps (`free-coding-models`, `claudish`), creates `~/.frugality/cache/` and `~/.frugality/logs/`, generates wrapper scripts in `~/bin/` with the frugality.py path **hardcoded at install time**, and runs initial model discovery.
+**`scripts/install.sh`**: installs npm deps (`free-coding-models`, `claudish`), creates `~/.frugality/cache/` and `~/.frugality/logs/`, generates `claude-frugal` wrapper in `~/bin/` with the frugality.py path **hardcoded at install time**, and runs initial model discovery.
 
 ## Key Paths
 
@@ -100,9 +93,6 @@ python3 frugality.py
 
 # Discover and certify new models (refresh mode)
 python3 frugality.py --refresh
-
-# Test OpenCode config path (not yet implemented)
-python3 frugality.py --opencode
 
 # Run unit tests
 python3 -m unittest discover tests -v
@@ -143,7 +133,6 @@ bash scripts/install.sh
 
 - The provider base URLs are hardcoded in `frugality.py`'s `PROVIDER_BASE_URLS` dict. Probing uses this dict -- it is the single source of truth. Add new providers there.
 - `free-coding-models` discovers candidates; certification probes validate tool-calling capability through the same provider URLs used in production routing.
-- Wrapper scripts in `bin/` have the frugality.py path hardcoded (set during `install.sh`). If you move the repo, re-run the installer or update the path manually.
+- The `claude-frugal` wrapper has the frugality.py path hardcoded (set during `install.sh`). If you move the repo, re-run the installer or update the path manually.
 - Cache TTL (discovery): 24 hours; to force fresh discovery, delete `~/.frugality/cache/last-known-good.json`
-- `frugality.py --opencode` flag is referenced by `frugal-opencode` but the OpenCode config path handling is not yet implemented.
 - Claudish is the proxy backend. It replaces the retired Claude Code Router (CCR). No more daemon management, health checks, or config.json routing.

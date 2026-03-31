@@ -5,7 +5,7 @@
 ### Deprecated
 - Claude Code Router (CCR) backend retired due to unreliable failover on
   tool call failures and lack of SSE protocol compliance.
-- `frugal-claude` CCR wrapper is superseded by Claudish-backed implementation.
+- `claude-frugal` CCR wrapper is superseded by Claudish-backed implementation.
 - CCR config generation in `frugality.py` is superseded by Claudish invocation.
 
 ### Migration

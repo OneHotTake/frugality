@@ -111,27 +111,26 @@ mkdir -p ~/.frugality/cache
 mkdir -p ~/.frugality/logs
 echo "OK  Created ~/.frugality/"
 
-# Create bin symlinks in ~/bin/
+# Create command wrappers in ~/bin/
 echo ""
 echo "=========================================="
 echo "  Setting Up Command Wrappers"
 echo "=========================================="
 echo ""
 
-# Create ~/bin/ if it doesn't exist
 mkdir -p "$HOME/bin"
 
 FRUGALITY_PY="$PROJECT_DIR/frugality.py"
 
-# Generate frugal-claude wrapper with hardcoded path
-cat > "$HOME/bin/frugal-claude" << WRAPPER_HEADER
+# Generate claude-frugal wrapper with hardcoded path
+cat > "$HOME/bin/claude-frugal" << WRAPPER_HEADER
 #!/usr/bin/env bash
 set -euo pipefail
 
 FRUGALITY_PY="$FRUGALITY_PY"
 WRAPPER_HEADER
 
-cat >> "$HOME/bin/frugal-claude" << 'WRAPPER_BODY'
+cat >> "$HOME/bin/claude-frugal" << 'WRAPPER_BODY'
 
 # --- Dependency check (fail fast) ---
 for cmd in python3 node claudish free-coding-models; do
@@ -178,60 +177,8 @@ echo "Launching Claudish..."
 eval "$FRUG_CLAUDISH_INVOCATION --interactive" "$@"
 WRAPPER_BODY
 
-chmod +x "$HOME/bin/frugal-claude"
-echo "OK  Created ~/bin/frugal-claude"
-
-# Generate frugal-opencode wrapper with hardcoded path (DEPRECATED)
-cat > "$HOME/bin/frugal-opencode" << WRAPPER_HEADER
-#!/usr/bin/env bash
-set -euo pipefail
-
-echo "WARNING: frugal-opencode is deprecated. Use frugal-claude with Claudish instead."
-
-FRUGALITY_PY="$FRUGALITY_PY"
-WRAPPER_HEADER
-
-cat >> "$HOME/bin/frugal-opencode" << 'WRAPPER_BODY'
-
-for cmd in python3 node free-coding-models; do
-    if ! command -v "$cmd" &> /dev/null; then
-        echo "Error: '$cmd' is required but not installed."
-        exit 1
-    fi
-done
-
-ENV_FILE="$HOME/.frugality/current_env.sh"
-
-RUN_DISCOVERY=0
-if [ ! -f "$ENV_FILE" ]; then
-    RUN_DISCOVERY=1
-else
-    ENV_MTIME=$(stat -c %Y "$ENV_FILE" 2>/dev/null || echo "0")
-    CURRENT_TIME=$(date +%s)
-    AGE_SEC=$((CURRENT_TIME - ENV_MTIME))
-    if [ "$AGE_SEC" -gt 3600 ]; then
-        RUN_DISCOVERY=1
-    fi
-fi
-
-if [ "$RUN_DISCOVERY" -eq 1 ]; then
-    echo "Running Frugality model discovery..."
-    python3 "$FRUGALITY_PY" "$@"
-    if [ $? -ne 0 ]; then
-        echo "Error: Frugality configuration failed."
-        exit 1
-    fi
-else
-    echo "Using cached env config."
-fi
-
-echo "Configuring OpenCode..."
-free-coding-models --opencode --tier S
-exec opencode "$@"
-WRAPPER_BODY
-
-chmod +x "$HOME/bin/frugal-opencode"
-echo "OK  Created ~/bin/frugal-opencode (DEPRECATED)"
+chmod +x "$HOME/bin/claude-frugal"
+echo "OK  Created ~/bin/claude-frugal"
 
 echo ""
 echo "=========================================="
@@ -245,5 +192,4 @@ echo ""
 echo "Installation complete!"
 echo ""
 echo "Usage:"
-echo "  frugal-claude        # Launch Claude Code via Claudish with free models"
-echo "  frugal-opencode      # (DEPRECATED) Launch OpenCode with free models"
+echo "  claude-frugal        # Launch Claude Code via Claudish with free models"

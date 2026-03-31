@@ -3,21 +3,21 @@
 > Claude Code. Free models. Zero compromise.
 
 > **v1.0.0 -> v2.0.0 Migration:** CCR has been retired. Run `npm uninstall -g @musistudio/claude-code-router`
-> to clean up. The `frugal-claude` command now uses Claudish as its proxy backend.
+> to clean up. The `claude-frugal` command now uses Claudish as its proxy backend.
 
 Claude Code is the best AI coding agent out there. It's also expensive when it's reading files, searching code, and doing background busywork. Frugality fixes that -- it auto-discovers the best free-tier models and routes the boring stuff there, so Claude's quota goes toward the things only Claude can do.
 
 ## How it works
 
 ```
-frugal-claude
+claude-frugal
     |
 frugality.py  ->  free-coding-models --json  ->  map to tiers  ->  write env file
     |
 claudish --model <best-model> --interactive  ->  Claude Code
 ```
 
-Every time you launch, it finds the best available free models and writes `~/.frugality/current_env.sh` for [Claudish](https://github.com/MadAppGang/claudish) to consume. You just type `frugal-claude` instead of `claude`.
+Every time you launch, it finds the best available free models and writes `~/.frugality/current_env.sh` for [Claudish](https://github.com/MadAppGang/claudish) to consume. You just type `claude-frugal` instead of `claude`.
 
 ## Routing tiers
 
@@ -47,14 +47,13 @@ cd frugality
 free-coding-models
 ```
 
-The installer drops `frugal-claude` into `~/bin/`. Make sure that's in your `$PATH`.
+The installer drops `claude-frugal` into `~/bin/`. Make sure that's in your `$PATH`.
 
 ## Usage
 
 ```bash
-frugal-claude        # discover models + launch Claude Code via Claudish
-frugal-opencode      # (DEPRECATED) configure OpenCode + launch
-python3 frugality.py # discover models and write env file only
+claude-frugal         # discover models + launch Claude Code via Claudish
+python3 frugality.py  # discover models and write env file only
 ```
 
 ## API keys

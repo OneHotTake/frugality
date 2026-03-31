@@ -983,7 +983,7 @@ def run_default_mode(credentials):
     certified = get_certified_models(registry)
     if not certified:
         print("ERROR: No certified models found.")
-        print("Run 'frugal-claude --refresh' to discover and certify models.")
+        print("Run 'claude-frugal --refresh' to discover and certify models.")
         return False
     print("  %d certified model(s) available" % len(certified))
     print()
@@ -1040,9 +1040,6 @@ if __name__ == "__main__":
         "--refresh",
         action="store_true",
         help="Discover and certify candidate models, then write env config",
-    )
-    parser.add_argument(
-        "--opencode", action="store_true", help="Write OpenCode config (not yet implemented)"
     )
     args = parser.parse_args()
     setup_logging(args.verbose, args.quiet)
