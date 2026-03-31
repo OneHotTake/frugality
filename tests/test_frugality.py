@@ -325,7 +325,7 @@ class TestProbeModel(unittest.TestCase):
         """Probe skips if no credentials available."""
         result = frugality.probe_model("test", "model", {})
         self.assertEqual(result["status"], "skipped")
-        self.assertEqual(result["failure_reason"], "no_credentials")
+        self.assertEqual(result["failure_reason"], "unconfigured_provider")
         mock_request.assert_not_called()
 
     @mock.patch("frugality._make_chat_request_with_retry")
