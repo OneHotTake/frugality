@@ -16,11 +16,11 @@ from pathlib import Path
 
 HOME = str(Path.home())
 FCM_CONFIG_PATH = os.path.join(HOME, ".free-coding-models.json")
-CCR_CONFIG_PATH = os.path.join(HOME, ".claude-code-router", "config.json")
 CACHE_DIR = os.path.join(HOME, ".frugality", "cache")
 CACHE_FILE = os.path.join(CACHE_DIR, "last-known-good.json")
 CERT_REGISTRY_FILE = os.path.join(CACHE_DIR, "certified_models.json")
 SELECTION_CACHE_FILE = os.path.join(CACHE_DIR, "selected_models.json")
+ENV_OUTPUT_FILE = os.path.join(HOME, ".frugality", "current_env.sh")
 
 CERT_SCHEMA_VERSION = 1
 PROBE_VERSION = 2  # Incremented: forces recertification on next --refresh
@@ -85,11 +85,10 @@ def backup_file(path):
     if not os.path.exists(path):
         return
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = f"{path}.backup_{timestamp}"
+    backup_path = "%s.backup_%s" % (path, timestamp)
     import shutil
-
     shutil.copy2(path, backup_path)
-    logger.info(f"Backed up existing config to {backup_path}")
+    logger.info("Backed up existing config to %s" % backup_path)
 
 
 def atomic_write_json(path, data):
@@ -105,18 +104,39 @@ def atomic_write_json(path, data):
     os.replace(temp_path, path)
 
 
-def discover_ollama_hosts(credentials: dict) -> list:
+def atomic_write_text(path, text):
+    dir_name = os.path.dirname(path)
+    if dir_name and not os.path.exists(dir_name):
+        os.makedirs(dir_name)
+
+    fd, temp_path = tempfile.mkstemp(dir=dir_name, text=True)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    os.replace(temp_path, path)
+
+
+def classify_call_weight(message_count, has_tools, prompt_length):
+    """Classify an API call as lightweight or heavy.
+
+    Lightweight calls are quota-check and topic-detection style: short,
+    tool-free, low-token. Heavy is everything else.
+    """
+    if message_count <= 2 and not has_tools and prompt_length < 500:
+        return "lightweight"
+    return "heavy"
+
+
+def discover_ollama_hosts(credentials):
     """Discover Ollama hosts from credentials config and check their health."""
     hosts_config = credentials.get("ollama_hosts", {})
     discovered = []
 
     for host_name, host_url in hosts_config.items():
-        provider_name = f"ollama-{host_name}"
-        base_url = f"http://{host_url}/api"
+        provider_name = "ollama-%s" % host_name
+        base_url = "http://%s/api" % host_url
 
-        # Check if host is reachable
         try:
-            tags_url = f"{base_url}/tags"
+            tags_url = "%s/tags" % base_url
             req = urllib.request.Request(tags_url, method="GET")
             with urllib.request.urlopen(req, timeout=2) as resp:
                 if resp.status == 200:
@@ -132,25 +152,22 @@ def discover_ollama_hosts(credentials: dict) -> list:
                             "status": "online",
                         })
 
-                    logger.info(f"Discovered {len(models)} models from Ollama host {host_name}")
+                    logger.info("Discovered %d models from Ollama host %s" % (len(models), host_name))
                 else:
-                    logger.warning(f"Ollama host {host_name} returned status {resp.status}")
+                    logger.warning("Ollama host %s returned status %d" % (host_name, resp.status))
         except urllib.error.URLError as e:
-            logger.warning(f"Ollama host {host_name} unreachable: {e.reason}")
+            logger.warning("Ollama host %s unreachable: %s" % (host_name, e.reason))
         except Exception as e:
-            logger.warning(f"Error checking Ollama host {host_name}: {e}")
+            logger.warning("Error checking Ollama host %s: %s" % (host_name, e))
 
     return discovered
 
 
-def probe_ollama_model(provider: str, model_id: str, credentials: dict) -> dict:
+def probe_ollama_model(provider, model_id, credentials):
     """Probe Ollama model to determine capabilities and response characteristics."""
-    base_url = PROVIDER_BASE_URLS.get(provider, "http://localhost:11434/v1/chat/completions")
-
-    # Extract host from provider name (ollama-{host})
     host_name = provider.replace("ollama-", "")
     host_config = credentials.get("ollama_hosts", {}).get(host_name, "localhost:11434")
-    base_url = f"http://{host_config}/v1/chat/completions"
+    base_url = "http://%s/v1/chat/completions" % host_config
 
     start_time = time.time()
     base_entry = {
@@ -171,10 +188,9 @@ def probe_ollama_model(provider: str, model_id: str, credentials: dict) -> dict:
     }
 
     try:
-        # Test with a simple completion to gauge response time
         resp = _make_chat_request_with_retry(
             base_url,
-            "ollama",  # Ollama doesn't need API key for local
+            "ollama",
             {
                 "model": model_id,
                 "messages": [{"role": "user", "content": "Count to 5"}],
@@ -185,7 +201,6 @@ def probe_ollama_model(provider: str, model_id: str, credentials: dict) -> dict:
         response_time = (time.time() - start_time) * 1000
         base_entry["response_time_ms"] = int(response_time)
 
-        # Determine model type based on response time and name
         model_lower = model_id.lower()
         if "coder" in model_lower or "code" in model_lower:
             base_entry["model_type"] = "coder"
@@ -198,7 +213,6 @@ def probe_ollama_model(provider: str, model_id: str, credentials: dict) -> dict:
         else:
             base_entry["model_type"] = "thinking"
 
-        # Try tool calling test
         try:
             tool_resp = _make_chat_request_with_retry(
                 base_url,
@@ -223,7 +237,6 @@ def probe_ollama_model(provider: str, model_id: str, credentials: dict) -> dict:
                 base_entry["capabilities"]["tool_calling"] = True
                 base_entry["capabilities"]["valid_json_args"] = True
 
-                # Try roundtrip
                 tool_call_id = tool_calls[0].get("id", "call_test_1")
                 round_resp = _make_chat_request_with_retry(
                     base_url,
@@ -257,11 +270,10 @@ def probe_ollama_model(provider: str, model_id: str, credentials: dict) -> dict:
                 base_entry["failure_reason"] = "no_tool_call"
         except Exception as e:
             base_entry["status"] = "certified"
-            base_entry["failure_reason"] = f"tool_error:{e}"
-            # Still certify if basic completion works
+            base_entry["failure_reason"] = "tool_error:%s" % e
 
     except Exception as e:
-        base_entry["failure_reason"] = f"probe_error:{e}"
+        base_entry["failure_reason"] = "probe_error:%s" % e
 
     return base_entry
 
@@ -285,7 +297,7 @@ def load_cache():
         cached_at = datetime.fromisoformat(data.get("cached_at", "2000-01-01T00:00:00"))
         cache_age = datetime.now() - cached_at
         if cache_age < timedelta(hours=24):
-            logger.info(f"Using cached config from {cached_at.isoformat()}")
+            logger.info("Using cached config from %s" % cached_at.isoformat())
             return data.get("models", [])
         else:
             logger.warning("Cache is stale (>24 hours)")
@@ -299,9 +311,9 @@ def save_cache(models):
     data = {"cached_at": datetime.now().isoformat(), "models": models}
     try:
         atomic_write_json(CACHE_FILE, data)
-        logger.debug(f"Saved {len(models)} models to cache")
+        logger.debug("Saved %d models to cache" % len(models))
     except Exception as e:
-        logger.warning(f"Failed to save cache: {e}")
+        logger.warning("Failed to save cache: %s" % e)
 
 
 def save_selection_cache(routes, selected_by="auto"):
@@ -325,9 +337,9 @@ def save_selection_cache(routes, selected_by="auto"):
 
     try:
         atomic_write_json(SELECTION_CACHE_FILE, data)
-        logger.debug(f"Saved selection cache with {len(data['routes'])} routes")
+        logger.debug("Saved selection cache with %d routes" % len(data['routes']))
     except Exception as e:
-        logger.warning(f"Failed to save selection cache: {e}")
+        logger.warning("Failed to save selection cache: %s" % e)
 
 
 def load_selection_cache():
@@ -339,14 +351,12 @@ def load_selection_cache():
         with open(SELECTION_CACHE_FILE, "r") as f:
             data = json.load(f)
 
-        # Check if cache is recent (24 hours)
         selected_at = datetime.fromisoformat(data.get("selected_at", "2000-01-01T00:00:00"))
         cache_age = datetime.now() - selected_at
         if cache_age > timedelta(hours=24):
             logger.debug("Selection cache is stale (>24 hours)")
             return None
 
-        # Convert back to format expected by map_tiers
         routes = {}
         for role, route_data in data.get("routes", {}).items():
             routes[role] = {
@@ -357,32 +367,31 @@ def load_selection_cache():
                 "sweScore": route_data.get("sweScore", "")
             }
 
-        logger.debug(f"Loaded selection cache from {selected_at.isoformat()}")
+        logger.debug("Loaded selection cache from %s" % selected_at.isoformat())
         return routes
     except Exception as e:
-        logger.debug(f"Failed to load selection cache: {e}")
+        logger.debug("Failed to load selection cache: %s" % e)
         return None
 
 
-def is_cloud_provider(provider: str) -> bool:
+def is_cloud_provider(provider):
     """Check if provider is a cloud provider (not local/Ollama)."""
     return not provider.startswith("ollama")
 
 
-def normalize_provider(provider: str) -> str:
-
+def normalize_provider(provider):
     return provider.strip().lower()
 
 
-def normalize_model_id(model_id: str) -> str:
+def normalize_model_id(model_id):
     return model_id.strip()
 
 
-def registry_key(provider: str, model_id: str) -> str:
-    return f"{normalize_provider(provider)},{normalize_model_id(model_id)}"
+def registry_key(provider, model_id):
+    return "%s,%s" % (normalize_provider(provider), normalize_model_id(model_id))
 
 
-def load_registry() -> dict:
+def load_registry():
     """Load cert registry. Returns empty registry on missing/corrupt/version-mismatch."""
     empty = {
         "schema_version": CERT_SCHEMA_VERSION,
@@ -396,21 +405,21 @@ def load_registry() -> dict:
         with open(CERT_REGISTRY_FILE) as f:
             data = json.load(f)
         if data.get("schema_version") != CERT_SCHEMA_VERSION:
-            logger.warning("Registry schema version mismatch — treating as empty")
+            logger.warning("Registry schema version mismatch -- treating as empty")
             return empty
         return data
     except Exception:
         return empty
 
 
-def save_registry(registry: dict) -> None:
+def save_registry(registry):
     registry["updated_at"] = datetime.now().isoformat()
     registry["probe_version"] = PROBE_VERSION
     os.makedirs(CACHE_DIR, exist_ok=True)
     atomic_write_json(CERT_REGISTRY_FILE, registry)
 
 
-def is_cert_stale(entry: dict) -> bool:
+def is_cert_stale(entry):
     """Stale if timestamp too old OR probe_version outdated."""
     if entry.get("probe_version", 0) < PROBE_VERSION:
         return True
@@ -421,7 +430,7 @@ def is_cert_stale(entry: dict) -> bool:
         return True
 
 
-def get_certified_models(registry: dict) -> list:
+def get_certified_models(registry):
     """Return FCM-shaped model dicts for all certified entries."""
     result = []
     for entry in registry.get("models", {}).values():
@@ -463,14 +472,14 @@ console.log(JSON.stringify(data));
             timeout=60,
         )
         if result.returncode != 0:
-            logger.debug(f"FCM stderr: {result.stderr}")
-            raise Exception(f"FCM exited with code {result.returncode}")
+            logger.debug("FCM stderr: %s" % result.stderr)
+            raise Exception("FCM exited with code %d" % result.returncode)
 
         if not result.stdout:
             raise Exception("FCM returned empty output")
 
         data = json.loads(result.stdout.strip())
-        logger.debug(f"FCM returned {len(data)} models")
+        logger.debug("FCM returned %d models" % len(data))
 
         if not isinstance(data, list) or len(data) == 0:
             raise Exception("FCM output is not a non-empty JSON array")
@@ -483,7 +492,8 @@ console.log(JSON.stringify(data));
             if "tier" not in first:
                 missing.append("tier")
             logger.warning(
-                f"FCM output schema has changed — missing fields: {missing}. Update frugality.py tier mapping to match new schema."
+                "FCM output schema has changed -- missing fields: %s. Update frugality.py tier mapping to match new schema."
+                % missing
             )
             raise Exception("FCM output missing required fields")
 
@@ -491,27 +501,25 @@ console.log(JSON.stringify(data));
         return data
 
     except json.JSONDecodeError as e:
-        logger.debug(f"JSON decode error: {e}")
-        raise Exception(f"Invalid JSON from FCM: {e}")
+        logger.debug("JSON decode error: %s" % e)
+        raise Exception("Invalid JSON from FCM: %s" % e)
     except Exception as e:
-        logger.debug(f"FCM error: {e}")
+        logger.debug("FCM error: %s" % e)
         raise e
 
 
-def discover_all_models(credentials: dict):
+def discover_all_models(credentials):
     """Discover models from both free-coding-models and Ollama hosts."""
     all_models = []
 
-    # Get FCM models
     fcm_models = None
     try:
         fcm_models = get_fcm_data()
         if fcm_models:
             all_models.extend(fcm_models)
     except Exception as e:
-        logger.warning(f"Failed to discover FCM models: {e}")
+        logger.warning("Failed to discover FCM models: %s" % e)
 
-    # Get Ollama models
     ollama_models = discover_ollama_hosts(credentials)
     if ollama_models:
         all_models.extend(ollama_models)
@@ -520,14 +528,13 @@ def discover_all_models(credentials: dict):
 
 
 def get_fcm_data_with_cache():
-
     try:
         return get_fcm_data()
     except Exception as e:
-        logger.warning(f"FCM discovery failed: {e}. Attempting cache fallback.")
+        logger.warning("FCM discovery failed: %s. Attempting cache fallback." % e)
         cached = load_cache()
         if cached:
-            logger.info(f"Using cached config from cache file")
+            logger.info("Using cached config from cache file")
             return cached
         else:
             logger.error("No valid cache available. Please check:")
@@ -556,7 +563,7 @@ def get_api_key(credentials, provider):
     return ""
 
 
-def _make_chat_request(url: str, api_key: str, payload: dict) -> dict:
+def _make_chat_request(url, api_key, payload):
     """POST payload to url. Returns parsed JSON response. Raises on network or HTTP error."""
     data = json.dumps(payload).encode()
     req = urllib.request.Request(
@@ -564,7 +571,7 @@ def _make_chat_request(url: str, api_key: str, payload: dict) -> dict:
         data=data,
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": "Bearer %s" % api_key,
         },
         method="POST",
     )
@@ -572,7 +579,7 @@ def _make_chat_request(url: str, api_key: str, payload: dict) -> dict:
         return json.loads(resp.read().decode())
 
 
-def _make_chat_request_with_retry(url: str, api_key: str, payload: dict) -> dict:
+def _make_chat_request_with_retry(url, api_key, payload):
     """
     Retry on transient 429/5xx errors with exponential backoff and jitter.
     For 429 (rate limit), use longer backoffs: 2s, 4s, 8s + jitter.
@@ -583,13 +590,12 @@ def _make_chat_request_with_retry(url: str, api_key: str, payload: dict) -> dict
             return _make_chat_request(url, api_key, payload)
         except urllib.error.HTTPError as e:
             if e.code in (429, 500, 502, 503, 504) and attempt < PROBE_MAX_RETRIES:
-                # Exponential backoff: 2s, 4s, 8s + random jitter 0-0.5s
                 base_delay = PROBE_RETRY_DELAY * (2 ** attempt)
                 jitter = random.uniform(0, 0.5)
                 delay = base_delay + jitter
                 if e.code == 429:
-                    delay *= 2  # Extra delay for rate limits
-                logger.debug(f"Retry attempt {attempt + 1} after {delay:.2f}s (error {e.code})")
+                    delay *= 2
+                logger.debug("Retry attempt %d after %.2fs (error %d)" % (attempt + 1, delay, e.code))
                 time.sleep(delay)
                 last_exc = e
                 continue
@@ -597,14 +603,13 @@ def _make_chat_request_with_retry(url: str, api_key: str, payload: dict) -> dict
     raise last_exc
 
 
-def probe_model(provider: str, model_id: str, credentials: dict) -> dict:
+def probe_model(provider, model_id, credentials):
     """
     Certification probe for profile 'tool_chat'.
-    Step 1+2: Send tool-call request → verify echo_number(value=7) emitted
-    Step 3:   Send tool result → verify final text answer contains "49"
-    Returns a registry entry dict (no tier/context metadata — caller adds those).
+    Step 1+2: Send tool-call request -> verify echo_number(value=7) emitted
+    Step 3:   Send tool result -> verify final text answer contains "49"
+    Returns a registry entry dict (no tier/context metadata -- caller adds those).
     """
-    # Use Ollama-specific probe for Ollama providers
     if normalize_provider(provider).startswith("ollama"):
         return probe_ollama_model(provider, model_id, credentials)
 
@@ -628,7 +633,6 @@ def probe_model(provider: str, model_id: str, credentials: dict) -> dict:
         "last_verified_at": datetime.now().isoformat(),
     }
 
-    # Skip if no credentials
     if not api_key:
         return {**base_entry, "status": "skipped", "failure_reason": "unconfigured_provider"}
 
@@ -654,13 +658,13 @@ def probe_model(provider: str, model_id: str, credentials: dict) -> dict:
             return {
                 **base_entry,
                 "status": "skipped",
-                "failure_reason": f"auth_error:{e.code}",
+                "failure_reason": "auth_error:%d" % e.code,
             }
-        return {**base_entry, "failure_reason": f"http_error:{e.code}"}
+        return {**base_entry, "failure_reason": "http_error:%d" % e.code}
     except urllib.error.URLError as e:
-        return {**base_entry, "status": "skipped", "failure_reason": f"connectivity:{e.reason}"}
+        return {**base_entry, "status": "skipped", "failure_reason": "connectivity:%s" % e.reason}
     except Exception as e:
-        return {**base_entry, "failure_reason": f"request_error:{e}"}
+        return {**base_entry, "failure_reason": "request_error:%s" % e}
 
     try:
         choice = resp["choices"][0]["message"]
@@ -671,13 +675,13 @@ def probe_model(provider: str, model_id: str, credentials: dict) -> dict:
         if tc["function"]["name"] != "echo_number":
             return {
                 **base_entry,
-                "failure_reason": f"wrong_tool_name:{tc['function']['name']}",
+                "failure_reason": "wrong_tool_name:%s" % tc['function']['name'],
             }
         args = json.loads(tc["function"]["arguments"])
         if args.get("value") != 7:
-            return {**base_entry, "failure_reason": f"bad_args:value={args.get('value')}"}
+            return {**base_entry, "failure_reason": "bad_args:value=%s" % args.get('value')}
     except Exception as e:
-        return {**base_entry, "failure_reason": f"parse_error:{e}"}
+        return {**base_entry, "failure_reason": "parse_error:%s" % e}
 
     base_entry["capabilities"]["tool_calling"] = True
     base_entry["capabilities"]["valid_json_args"] = True
@@ -710,35 +714,26 @@ def probe_model(provider: str, model_id: str, credentials: dict) -> dict:
         content = final.get("content") or ""
         if not content:
             return {**base_entry, "failure_reason": "empty_final_response"}
-        # Verify model actually consumed the tool result (must reference "49")
         if "49" not in content:
             return {**base_entry, "failure_reason": "roundtrip_result_ignored"}
     except Exception as e:
-        return {**base_entry, "failure_reason": f"roundtrip_error:{e}"}
+        return {**base_entry, "failure_reason": "roundtrip_error:%s" % e}
 
     base_entry["capabilities"]["tool_roundtrip"] = True
     return {**base_entry, "status": "certified"}
 
 
-def _parse_context_tokens(context_str: str) -> int:
+def _parse_context_tokens(context_str):
     try:
         return int(context_str.replace("k", "000").replace("M", "000000") or "0")
     except Exception:
         return 0
 
 
-# MARKER_START_RUN_PROBES
-def run_probes(candidates: list, registry: dict, credentials: dict) -> dict:
+def run_probes(candidates, registry, credentials):
     """
     Determine which candidates need probing, run with provider-aware concurrency,
     merge results into registry. Returns updated registry.
-
-    Provider-aware concurrency:
-    - Groups candidates by provider
-    - Processes each provider's models sequentially (max 1 concurrent request per provider)
-    - Adds PROBE_PROVIDER_DELAY between requests to same provider
-    - Uses PROBE_WORKERS to parallelize across different providers
-    - This prevents hammering the same provider with parallel requests
     """
     to_probe = []
     for m in candidates:
@@ -749,25 +744,23 @@ def run_probes(candidates: list, registry: dict, credentials: dict) -> dict:
         key = registry_key(provider, model_id)
         existing = registry["models"].get(key, {})
         if existing.get("status") == "blocked":
-            continue  # never re-probe blocked models
+            continue
         if existing.get("status") == "certified" and not is_cert_stale(existing):
-            continue  # fresh cert, skip
+            continue
         to_probe.append(m)
 
     if not to_probe:
-        print(" All candidates have fresh certifications — nothing to probe.")
+        print(" All candidates have fresh certifications -- nothing to probe.")
         return registry
 
-    print(f" Probing {len(to_probe)} candidate(s) (workers={PROBE_WORKERS}, provider-aware)...")
+    print(" Probing %d candidate(s) (workers=%d, provider-aware)..." % (len(to_probe), PROBE_WORKERS))
 
-    # Group candidates by provider for provider-aware concurrency
     by_provider = {}
     for m in to_probe:
         provider = normalize_provider(m.get("provider", ""))
         by_provider.setdefault(provider, []).append(m)
 
-    # Process each provider group with delays
-    def _process_provider(provider_name: str, models: list) -> list:
+    def _process_provider(provider_name, models):
         """Process all models for a single provider sequentially with delays."""
         results = []
         for idx, m in enumerate(models):
@@ -775,7 +768,6 @@ def run_probes(candidates: list, registry: dict, credentials: dict) -> dict:
                 time.sleep(PROBE_PROVIDER_DELAY)
             model_id = m.get("modelId", "")
             result = probe_model(provider_name, model_id, credentials)
-            # Merge discovery metadata into result
             result["tier"] = m.get("tier", "")
             result["context"] = m.get("context", "0")
             result["context_tokens"] = _parse_context_tokens(m.get("context", "0"))
@@ -785,12 +777,11 @@ def run_probes(candidates: list, registry: dict, credentials: dict) -> dict:
             results.append((m, result))
             status_str = {
                 "certified": "OK",
-                "skipped": f"SKIPPED ({result.get('failure_reason', '?')})",
-            }.get(result["status"], f"FAIL ({result.get('failure_reason', '?')})")
-            print(f" {provider_name}/{model_id}: {status_str}")
+                "skipped": "SKIPPED (%s)" % result.get('failure_reason', '?'),
+            }.get(result["status"], "FAIL (%s)" % result.get('failure_reason', '?'))
+            print(" %s/%s: %s" % (provider_name, model_id, status_str))
         return results
 
-    # Use ThreadPoolExecutor to parallelize across providers
     with ThreadPoolExecutor(max_workers=PROBE_WORKERS) as pool:
         futures = {}
         for provider, models in by_provider.items():
@@ -807,9 +798,10 @@ def run_probes(candidates: list, registry: dict, credentials: dict) -> dict:
                     key = registry_key(p, model_id)
                     registry["models"][key] = result
             except Exception as e:
-                logger.error(f"Error processing provider {provider}: {e}")
+                logger.error("Error processing provider %s: %s" % (provider, e))
 
     return registry
+
 
 def map_tiers(models):
     routes = {"default": None, "background": None, "think": None, "longContext": None}
@@ -843,10 +835,8 @@ def map_tiers(models):
     # Prefer cloud providers over Ollama when both available
     for role, route in routes.items():
         if route and is_cloud_provider(route.get("provider", "")):
-            # If this is a cloud provider, check if we could replace an Ollama route
             for other_role, other_route in routes.items():
                 if other_route and not is_cloud_provider(other_route.get("provider", "")):
-                    # If role is more important/earlier, prefer cloud
                     role_priority = ["default", "background", "think", "longContext"]
                     if role_priority.index(role) <= role_priority.index(other_role):
                         routes[other_role] = route
@@ -858,222 +848,108 @@ def map_tiers(models):
     return routes
 
 
-def build_provider_config(models, credentials):
-    providers_map = {}
+def _select_best_openrouter_model(certified):
+    """Select the best S-tier model available via OpenRouter for claudish invocation.
 
-    for m in models:
-        provider_key = m.get("provider", "")
-        if not provider_key:
-            continue
+    Claudish routes through OpenRouter, so we prefer openrouter-provider models.
+    Falls back to any S-tier model if no openrouter model is found.
+    """
+    # Prefer openrouter S-tier
+    for m in certified:
+        if m.get("provider") == "openrouter" and m.get("tier") in ["S+", "S"]:
+            return m
 
-        if provider_key not in providers_map:
-            base_url = PROVIDER_BASE_URLS.get(
-                provider_key, "https://api.openai.com/v1/chat/completions"
-            )
-            api_key = get_api_key(credentials, provider_key)
+    # Fall back to any S-tier
+    for m in certified:
+        if m.get("tier") in ["S+", "S"]:
+            return m
 
-            providers_map[provider_key] = {
-                "name": provider_key,
-                "api_base_url": base_url,
-                "api_key": api_key,
-                "models": [],
-            }
+    # Fall back to first available
+    if certified:
+        return certified[0]
 
-        model_id = m.get("modelId", "")
-        if model_id:
-            providers_map[provider_key]["models"].append(model_id)
-
-    return list(providers_map.values())
+    return None
 
 
-def format_model_display(model_data, full=False):
-    """Format model data for display."""
-    if not model_data:
-        return "(none selected)"
+def write_env_file(selected, best_model):
+    """Write shell-sourceable env file to ~/.frugality/current_env.sh."""
+    default_model = selected.get("default") or {}
+    background_model = selected.get("background") or {}
+    think_model = selected.get("think") or {}
+    longctx_model = selected.get("longContext") or {}
 
-    model_id = model_data.get("modelId", "unknown")
-    provider = model_data.get("provider", "unknown")
-    tier = model_data.get("tier", "")
-    context = model_data.get("context", "")
-    swe_score = model_data.get("sweScore", "")
+    default_id = default_model.get("modelId", "")
+    background_id = background_model.get("modelId", "")
+    think_id = think_model.get("modelId", "")
+    longctx_id = longctx_model.get("modelId", "")
 
-    if full:
-        return f"{provider}/{model_id} [{tier}] {context} {swe_score}"
+    active_provider = best_model.get("provider", "openrouter") if best_model else "openrouter"
+    best_model_id = best_model.get("modelId", "") if best_model else ""
+
+    # Build claudish invocation string
+    # Use openrouter@ prefix if the model is from openrouter
+    if active_provider == "openrouter" and best_model_id:
+        claudish_model_ref = "openrouter@%s" % best_model_id
+    elif best_model_id:
+        claudish_model_ref = "%s@%s" % (active_provider, best_model_id)
     else:
-        # Abbreviated display for prompt mode
-        parts = [f"{provider}/{model_id}"]
-        if tier:
-            parts.append(f"[{tier}]")
-        if context and context != "0":
-            if "M" in context:
-                parts.append(f"[{context}]")
-            else:
-                parts.append(f"[{context}]")
-        return " ".join(parts)
+        claudish_model_ref = ""
+
+    lines = [
+        "#!/usr/bin/env bash",
+        "# Auto-generated by frugality.py -- do not edit manually",
+        "# Generated at: %s" % datetime.now().isoformat(),
+        "",
+        "export FRUG_DEFAULT_MODEL=\"%s\"" % default_id,
+        "export FRUG_BACKGROUND_MODEL=\"%s\"" % background_id,
+        "export FRUG_THINK_MODEL=\"%s\"" % think_id,
+        "export FRUG_LONGCTX_MODEL=\"%s\"" % longctx_id,
+        "export FRUG_ACTIVE_PROVIDER=\"%s\"" % active_provider,
+        "export FRUG_CLAUDISH_INVOCATION=\"claudish --model %s\"" % claudish_model_ref,
+        "",
+    ]
+
+    env_content = "\n".join(lines) + "\n"
+    os.makedirs(os.path.dirname(ENV_OUTPUT_FILE), exist_ok=True)
+    atomic_write_text(ENV_OUTPUT_FILE, env_content)
+    logger.info("Wrote env file to %s" % ENV_OUTPUT_FILE)
 
 
-def show_model_selection_prompt(models, timeout=3):
-    """Show interactive prompt with model selection. Returns action code."""
-    os.system('clear' if os.name == 'posix' else 'cls')
+def print_human_summary(selected, best_model):
+    """Print human-readable summary of selected models."""
+    print("")
+    print("=" * 50)
+    print(" Frugality Model Selection (Claudish backend)")
+    print("=" * 50)
+    print("")
 
-    print("\n" + "="*50)
-    print(" Current Model Selection ")
-    print("="*50 + "\n")
+    role_labels = {
+        "default": ("default (S)", "General coding"),
+        "background": ("background (A)", "Lightweight/background tasks"),
+        "think": ("think", "Reasoning tasks"),
+        "longContext": ("longContext", "Large file/context tasks"),
+    }
 
-    selected = map_tiers(models)
-
-    # Display model assignments
-    for i, role in enumerate(["default", "background", "think", "longContext"], 1):
+    for role, (label, desc) in role_labels.items():
         model_data = selected.get(role)
-        display = format_model_display(model_data)
-        role_name = role.replace("default", "default (S)")
-        print(f" {role_name:20} → {display}")
+        if model_data:
+            model_id = model_data.get("modelId", "?")
+            provider = model_data.get("provider", "?")
+            tier = model_data.get("tier", "?")
+            context = model_data.get("context", "?")
+            print("  %-22s -> %s/%s [%s] %s" % (label, provider, model_id, tier, context))
+            print("    (%s)" % desc)
+        else:
+            print("  %-22s -> (none selected)" % label)
+        print("")
 
-    print("\n" + "="*50)
-    print("\n Options:")
-    print(f" [1] ✓ Accept & Launch (timeout in {timeout}s)")
-    print(" [2] ♻️  Refresh from providers")
-    print(" [3] ✎ Edit model assignments")
-    print()
-
-    # Set up timeout
-    import signal
-
-    def timeout_handler(signum, frame):
-        raise TimeoutError()
-
-    # Configure timeout
-    if hasattr(signal, 'SIGALRM'):
-        signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(timeout)
-
-    try:
-        choice = input("Selection [1-3]: ").strip()
-        if hasattr(signal, 'SIGALRM'):
-            signal.alarm(0)  # Cancel alarm
-
-        if not choice:
-            return 0  # Accept (timeout)
-
-        try:
-            choice_num = int(choice)
-            if 1 <= choice_num <= 3:
-                return choice_num - 1  # Convert to 0-based
-        except ValueError:
-            pass
-
-        print("Invalid choice. Accepting current selection.")
-        return 0
-
-    except (TimeoutError, KeyboardInterrupt):
-        print("\nTime's up! Accepting current selection...")
-        return 0
-
-    return 0
-
-
-def interactive_model_selection(models):
-    """Interactive model selection menu."""
-    selected = map_tiers(models)
-
-    while True:
-        os.system('clear' if os.name == 'posix' else 'cls')
-        print("\n" + "="*50)
-        print(" Edit Model Assignments ")
-        print("="*50 + "\n")
-
-        # Show current assignments
-        print("Current assignments:\n")
-        for i, role in enumerate(["default", "background", "think", "longContext"], 1):
-            model_data = selected.get(role)
-            display = format_model_display(model_data, full=True)
-            print(f" [{i}] {role:15} → {display}")
-
-        # Get available models by tier
-        tier_models = {"S+": [], "S": [], "A+": [], "A": [], "B+": [], "B": [], "": []}
-        for m in models:
-            tier = m.get("tier", "")
-            if tier in tier_models:
-                tier_models[tier].append(m)
-
-        # Sort within tiers by model name
-        for tier in tier_models:
-            tier_models[tier].sort(key=lambda x: x.get("modelId", ""))
-
-        print("\n" + "="*50)
-        print("\n [1-4] Change assignment | [5] Save & Exit | [6] Cancel")
-        print()
-
-        choice = input("Selection: ").strip()
-
-        try:
-            choice_num = int(choice)
-
-            if choice_num == 5:
-                # Save and exit
-                return selected
-            elif choice_num == 6:
-                # Cancel - return None to signal no change
-                return None
-            elif 1 <= choice_num <= 4:
-                # Edit specific tier
-                roles = ["default", "background", "think", "longContext"]
-                role = roles[choice_num - 1]
-
-                # Show available models for this role
-                print(f"\nAvailable models for '{role}':\n")
-
-                # Determine appropriate tiers for this role
-                if role == "think":
-                    suitable_tiers = ["", "B", "B+", "A", "A+", "S", "S+"]
-                elif role == "longContext":
-                    suitable_tiers = ["", "B", "B+", "A", "A+", "S", "S+"]
-                elif role == "default":
-                    suitable_tiers = ["S", "S+", "A+", "A"]
-                else:  # background
-                    suitable_tiers = ["A+", "A", "S", "S+"]
-
-                available_models = []
-                for tier in suitable_tiers:
-                    available_models.extend(tier_models.get(tier, []))
-
-                # Remove duplicates and sort
-                seen = set()
-                unique_models = []
-                for m in available_models:
-                    key = (m.get("provider", ""), m.get("modelId", ""))
-                    if key not in seen:
-                        seen.add(key)
-                        unique_models.append(m)
-
-                if not unique_models:
-                    print("No suitable models available for this role.")
-                    input("\nPress Enter to continue...")
-                    continue
-
-                # Display available models
-                for i, m in enumerate(unique_models, 1):
-                    current_marker = " ← CURRENT" if selected.get(role) and selected[role].get("modelId") == m.get("modelId") else ""
-                    print(f" [{i}] {format_model_display(m, full=True)}{current_marker}")
-
-                print(f"\n [0] Cancel")
-                model_choice = input(f"\nSelect model for {role}: ").strip()
-
-                try:
-                    model_choice_num = int(model_choice)
-                    if model_choice_num == 0:
-                        continue
-                    elif 1 <= model_choice_num <= len(unique_models):
-                        selected[role] = unique_models[model_choice_num - 1]
-                        print(f"\n✓ Updated {role} assignment")
-                        time.sleep(0.5)
-                except ValueError:
-                    print("Invalid selection.")
-                    time.sleep(0.5)
-
-        except ValueError:
-            print("Invalid selection.")
-            time.sleep(0.5)
+    if best_model:
+        print("  Claudish invocation: claudish --model %s@%s" % (
+            best_model.get("provider", "openrouter"),
+            best_model.get("modelId", "")
+        ))
+    print("")
+    print("=" * 50)
 
 
 def print_selection_summary(selected):
@@ -1086,136 +962,70 @@ def print_selection_summary(selected):
             tier = model_data.get("tier", "unknown")
             context = model_data.get("context", "unknown")
             uptime = model_data.get("uptime", "unknown")
-            logger.info(f"  {role:12} → {provider:15} / {model_id}")
-            logger.info(f"                 {tier:3}-tier | {context:>8} context | {uptime}% uptime")
+            logger.info("  %12s -> %15s / %s" % (role, provider, model_id))
+            logger.info("                 %3s-tier | %8s context | %s%% uptime" % (tier, context, uptime))
         else:
-            logger.info(f"  {role:12} → (none selected)")
+            logger.info("  %12s -> (none selected)" % role)
+
 
 def print_provider_details(credentials):
     """Print configured provider endpoints."""
     logger.info("Provider endpoints:")
     for provider, base_url in sorted(PROVIDER_BASE_URLS.items()):
         api_key = get_api_key(credentials, provider)
-        status = "✓ configured" if api_key else "⊘ unconfigured"
-        logger.info(f"  {provider:15} {status:20} {base_url}")
+        status = "configured" if api_key else "unconfigured"
+        logger.info("  %15s %20s %s" % (provider, status, base_url))
 
 
-def update_ccr_config(models: list, credentials: dict, use_cache: bool = False) -> bool:
-    """Update CCR config, optionally using cached selections."""
-    logger.info("Configuring Claude Code Router")
+def run_default_mode(credentials):
+    print("Using certified model registry")
+    registry = load_registry()
+    certified = get_certified_models(registry)
+    if not certified:
+        print("ERROR: No certified models found.")
+        print("Run 'frugal-claude --refresh' to discover and certify models.")
+        return False
+    print("  %d certified model(s) available" % len(certified))
+    print()
+    print_provider_details(credentials)
+    print()
 
-    # Try to use cached selections if requested
-    if use_cache:
-        cached = load_selection_cache()
-        if cached:
-            logger.info("Using cached model selections")
-            selected = cached
-        else:
-            selected = map_tiers(models)
-    else:
-        selected = map_tiers(models)
-
+    selected = map_tiers(certified)
     if not selected.get("default"):
         logger.error("No suitable models found for default route")
         return False
 
+    best_model = _select_best_openrouter_model(certified)
+    write_env_file(selected, best_model)
     print_selection_summary(selected)
-    providers = build_provider_config(models, credentials)
-    router_config = {}
-    for role, model_data in selected.items():
-        if model_data:
-            model_id = model_data["modelId"]
-            provider = model_data.get("provider", "")
-            router_config[role] = f"{provider},{model_id}" if provider else model_id
-    ccr_config = {"Providers": providers, "Router": router_config}
-    try:
-        atomic_write_json(CCR_CONFIG_PATH, ccr_config)
-        logger.info(f"Updated CCR config at {CCR_CONFIG_PATH}")
-        # Save to selection cache if we mapped tiers
-        if not use_cache or not cached:
-            save_selection_cache(selected, "auto")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to write config: {e}")
-        return False
+    print_human_summary(selected, best_model)
+    save_selection_cache(selected, "auto")
+    return True
 
 
-def run_default_mode(credentials: dict) -> bool:
-    print("Using certified model registry")
-    registry = load_registry()
-    certified = get_certified_models(registry)
-    if not certified:
-        print("ERROR: No certified models found.")
-        print("Run 'frugal-claude --refresh' to discover and certify models.")
-        return False
-    print(f"  {len(certified)} certified model(s) available")
-    print()
-    print_provider_details(credentials)
-    print()
-    return update_ccr_config(certified, credentials)
-
-
-def run_refresh_mode(credentials: dict) -> bool:
-    print("Refresh requested — discovering candidates from free-coding-models")
+def run_refresh_mode(credentials):
+    print("Refresh requested -- discovering candidates from free-coding-models")
     candidates = get_fcm_data_with_cache()
     if not candidates:
         return False
-    print(f"  Discovered {len(candidates)} candidate(s)")
+    print("  Discovered %d candidate(s)" % len(candidates))
     registry = load_registry()
     registry = run_probes(candidates, registry, credentials)
     save_registry(registry)
     certified = get_certified_models(registry)
-    print(f"  Certified {len(certified)}/{len(candidates)} models")
+    print("  Certified %d/%d models" % (len(certified), len(candidates)))
     if not certified:
         print("ERROR: No models passed certification.")
         print("Check API keys and provider availability.")
         return False
-    return update_ccr_config(certified, credentials)
 
-
-
-def run_prompt_mode(credentials: dict, timeout: int = 3) -> int:
-    """Run interactive prompt mode, returns action code."""
-    print("Using certified model registry")
-    registry = load_registry()
-    certified = get_certified_models(registry)
-
-    if not certified:
-        print("ERROR: No certified models found.")
-        print("Run 'frugal-claude --refresh' to discover and certify models.")
-        return -1
-
-    print(f" {len(certified)} certified model(s) available")
-    print()
-
-    # Show the prompt and get user choice
-    action = show_model_selection_prompt(certified, timeout)
-    return action
-
-
-def run_edit_mode(credentials: dict) -> bool:
-    """Run interactive model selection editor."""
-    print("Using certified model registry")
-    registry = load_registry()
-    certified = get_certified_models(registry)
-
-    if not certified:
-        print("ERROR: No certified models found.")
-        print("Run 'frugal-claude --refresh' to discover and certify models.")
-        return False
-
-    # Run interactive selection
-    selected = interactive_model_selection(certified)
-
-    if selected is None:
-        print("\nEdit cancelled, no changes made.")
-        return True  # Not an error, just cancelled
-
-    # Update config with new selection
-    success = update_ccr_config([selected[k] for k in selected if selected[k]], credentials)
-    if success:
-        save_selection_cache(selected, "edit")
-    return success
+    selected = map_tiers(certified)
+    best_model = _select_best_openrouter_model(certified)
+    write_env_file(selected, best_model)
+    print_selection_summary(selected)
+    print_human_summary(selected, best_model)
+    save_selection_cache(selected, "auto")
+    return True
 
 
 if __name__ == "__main__":
@@ -1229,35 +1039,26 @@ if __name__ == "__main__":
     parser.add_argument(
         "--refresh",
         action="store_true",
-        help="Discover and certify candidate models, then update CCR config",
+        help="Discover and certify candidate models, then write env config",
     )
     parser.add_argument(
         "--opencode", action="store_true", help="Write OpenCode config (not yet implemented)"
     )
-    parser.add_argument(
-        "--prompt", action="store_true", help="Show interactive model selection prompt"
-    )
-    parser.add_argument(
-        "--edit", action="store_true", help="Open interactive model assignment editor"
-    )
-    parser.add_argument(
-        "--timeout", type=int, default=3, help="Timeout for prompt mode (default: 3s)"
-    )
     args = parser.parse_args()
     setup_logging(args.verbose, args.quiet)
     credentials = get_fcm_credentials()
-    
-    # Determine mode
-    if args.prompt:
-        # Return action code directly for wrapper script
-        sys.exit(run_prompt_mode(credentials, args.timeout))
-    elif args.edit:
-        success = run_edit_mode(credentials)
-    elif args.refresh:
+
+    if args.refresh:
         success = run_refresh_mode(credentials)
     else:
         success = run_default_mode(credentials)
-    
+
     if success:
         logger.info("Configuration complete")
     sys.exit(0 if success else 1)
+
+
+# --- Inline assertions for classify_call_weight ---
+assert classify_call_weight(1, False, 100) == "lightweight", "Short tool-free call should be lightweight"
+assert classify_call_weight(5, True, 2000) == "heavy", "Multi-message tool call should be heavy"
+assert classify_call_weight(2, False, 499) == "lightweight", "Edge case: max params for lightweight"

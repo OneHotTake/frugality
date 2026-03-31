@@ -2,74 +2,95 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-# Frugality — Cost-Optimized AI Development
+# Frugality -- Cost-Optimized AI Development
 
-Frugality discovers available free-tier AI models and configures Claude Code Router (CCR) and OpenCode to use them automatically.
+Frugality discovers available free-tier AI models and configures [Claudish](https://github.com/MadAppGang/claudish) and OpenCode to use them automatically.
+
+## Prerequisites
+
+- Python 3.7+
+- Node.js 18+
+- `free-coding-models` (npm)
+- `claudish` (npm) -- proxy backend that replaces the retired CCR
 
 ## Architecture
 
 ### Model Certification Gate
 
-Frugality now enforces a **certification gate** to prevent routing through models that don't support tool calling.
+Frugality enforces a **certification gate** to prevent routing through models that don't support tool calling.
 
 **Default mode** (no flags):
 - Loads `~/.frugality/cache/certified_models.json`
 - Filters to `status == "certified"` only
-- If none available → exit 1 with guidance to run `--refresh`
-- Routes through certified models only
+- If none available -> exit 1 with guidance to run `--refresh`
+- Maps certified models to 4 routing tiers
+- Writes `~/.frugality/current_env.sh` with model env vars and Claudish invocation
 
 **Refresh mode** (`--refresh`):
 - Runs `free-coding-models --json --hide-unconfigured` (live discovery)
 - Probes candidates: emits tool call, validates roundtrip behavior
 - Persists results to registry with `status: certified|failed|skipped|blocked`
-- Routes through newly certified models
+- Maps certified models to routing tiers and writes env file
 
 **Core invariant**: `free-coding-models` produces **candidates**; probing produces **eligibility**; routing uses **certified** models only.
 
-The flow is: `frugal-claude` / `frugal-opencode` wrapper scripts → `frugality.py` → writes CCR config → launches the tool.
+The flow is: `frugal-claude` wrapper -> `frugality.py` -> writes `~/.frugality/current_env.sh` -> sources env -> invokes `claudish --model <model> --interactive`.
 
 **`frugality.py`** is the core engine:
 
 *Default mode:*
 1. Loads `~/.frugality/cache/certified_models.json`
 2. Filters to `status == "certified"`
-3. Maps certified models to 4 CCR routing tiers: `default` (S/S+), `background` (A+/A), `think` (reasoning models), `longContext` (>32K context)
-4. Builds provider configs using API keys from `~/.free-coding-models.json`
-5. Atomically writes `~/.claude-code-router/config.json`
+3. Maps certified models to 4 routing tiers: `default` (S/S+), `background` (A+/A), `think` (reasoning models), `longContext` (>32K context)
+4. Selects best OpenRouter model for Claudish invocation
+5. Writes `~/.frugality/current_env.sh` with env vars and `FRUG_CLAUDISH_INVOCATION`
 
 *Refresh mode (`--refresh`):*
 1. Runs `free-coding-models --json --hide-unconfigured` to discover candidates
 2. Falls back to `~/.frugality/cache/last-known-good.json` (24-hour cache) if discovery fails
 3. Loads existing `~/.frugality/cache/certified_models.json`
-4. Probes each candidate concurrently (4 workers):
+4. Probes each candidate concurrently (provider-aware, 2 workers):
    - Step 1+2: Emits `echo_number(7)` tool call
    - Step 3: Validates roundtrip (model consumes tool result, final response contains "49")
    - Records `status: certified|failed|skipped` with failure reason
 5. Persists updated registry (increments `updated_at`, stamps each entry with `last_verified_at`)
 6. Maps certified models to routing tiers (same as default mode)
-7. Writes CCR config
+7. Writes env file and prints summary
 
-**`bin/frugal-claude`**: Smart CCR wrapper that:
-- Accepts `--connect` to skip config generation and connect to existing instance
-- Accepts `--restart` / `--force` to update config and restart CCR
-- Accepts `--refresh` to trigger live discovery + probing (can combine with `--restart`)
-- When CCR is already running with no flags, shows interactive prompt recommending action based on config age (<5 min = connect; >5 min = restart with 5s timeout, defaults to recommendation)
-- When CCR is not running, runs config generation and starts CCR
-- Polls `localhost:3456` health check (8 retries × 2s) before launching claude
-- Sets `ANTHROPIC_BASE_URL="http://127.0.0.1:3456"` and execs `claude`
+### Call Classification
 
-**`bin/frugal-opencode`**: calls `frugality.py --opencode`, then `exec opencode`.
+`classify_call_weight(message_count, has_tools, prompt_length)` classifies API calls:
+- Returns `"lightweight"` if message_count <= 2 AND no tools AND prompt_length < 500
+- Returns `"heavy"` otherwise
+- Purpose: detect quota-check/topic-detection calls for cheap routing
 
-**`scripts/install.sh`**: installs npm deps (`free-coding-models`, `@musistudio/claude-code-router`), creates `~/.frugality/cache/` and `~/.frugality/logs/`, generates wrapper scripts in `~/bin/` with the frugality.py path **hardcoded at install time**, and runs initial `--refresh` to populate cert registry.
+### Wrapper Scripts
+
+**`bin/frugal-claude`**: Claudish launcher that:
+- Checks dependencies at startup (python3, node, claudish, free-coding-models)
+- Runs `frugality.py` for model discovery
+- Sources `~/.frugality/current_env.sh`
+- Invokes `$FRUG_CLAUDISH_INVOCATION --interactive` with pass-through args
+- No restart logic, no daemon management -- Claudish handles protocol compliance
+
+**`bin/frugal-opencode`** (DEPRECATED):
+- Prints deprecation warning
+- Same dependency checks minus claudish
+- Runs frugality.py if env file is missing or >1 hour old
+- Calls `free-coding-models --opencode --tier S` to configure OpenCode
+- Launches `opencode`
+
+**`scripts/install.sh`**: installs npm deps (`free-coding-models`, `claudish`), creates `~/.frugality/cache/` and `~/.frugality/logs/`, generates wrapper scripts in `~/bin/` with the frugality.py path **hardcoded at install time**, and runs initial model discovery.
 
 ## Key Paths
 
 | Path | Purpose |
 |------|---------|
 | `~/.free-coding-models.json` | API keys (input) |
-| `~/.claude-code-router/config.json` | CCR config (output) |
+| `~/.frugality/current_env.sh` | Shell env file with model selections (output) |
 | `~/.frugality/cache/last-known-good.json` | Model discovery cache (24-hour) |
 | `~/.frugality/cache/certified_models.json` | Model certification registry (probed models, metadata) |
+| `~/.frugality/cache/selected_models.json` | Model selection cache (24-hour) |
 
 ## Development Commands
 
@@ -89,29 +110,18 @@ python3 -m unittest discover tests -v
 # Inspect certification registry
 python3 -m json.tool ~/.frugality/cache/certified_models.json
 
-# Check CCR health
-ccr status
+# Check generated env file
+cat ~/.frugality/current_env.sh
 
-# View CCR routing logs
-tail -f ~/.claude-code-router/logs/ccr-*.log
-
-# Re-run install (regenerates wrapper scripts with current path, runs --refresh)
+# Re-run install (regenerates wrapper scripts with current path)
 bash scripts/install.sh
-
-# Frugal-Claude usage
-frugal-claude                       # Interactive prompt if CCR running, otherwise normal startup
-frugal-claude --connect             # Connect to existing instance without restart
-frugal-claude --restart             # Update config and restart CCR (skip prompt)
-frugal-claude --refresh             # Trigger live discovery + probing
-frugal-claude --restart --refresh   # Combine: probe, then restart CCR
-frugal-claude --force               # Alias for --restart
 ```
 
 ## Model Tier Reference
 
-| Tier | SWE Score | CCR Route Use Case |
-|------|-----------|--------------------|
-| S+ (≥70%) / S (60-70%) | `default` | General coding |
+| Tier | SWE Score | Routing Use Case |
+|------|-----------|------------------|
+| S+ (>=70%) / S (60-70%) | `default` | General coding |
 | A+ / A (40-60%) | `background` | Lightweight/background tasks |
 | Contains "r1", "v3", "reasoning", "think" | `think` | Reasoning tasks |
 | >32K context window | `longContext` | Large file/context tasks |
@@ -127,12 +137,13 @@ frugal-claude --force               # Alias for --restart
 - **Skipped status**: Automatic when credentials missing or provider unreachable (not model failure; does not route)
 - **Failed status**: Model tested but behaviorally failed (e.g., no tool call, wrong roundtrip); does not route
 - **Probe timeout**: 15s per HTTP call; retry on 429/5xx up to 2 times with exponential backoff
-- **Concurrency**: 4 workers for probing; tune `PROBE_WORKERS` if hitting rate limits
+- **Concurrency**: 2 workers for probing with provider-aware scheduling; tune `PROBE_WORKERS` if hitting rate limits
 
 ### Model Discovery & Routing
 
-- The 16 provider base URLs are hardcoded in `frugality.py`'s `PROVIDER_BASE_URLS` dict. **Probing and CCR config generation both use this dict** — it is the single source of truth. Add new providers there.
+- The provider base URLs are hardcoded in `frugality.py`'s `PROVIDER_BASE_URLS` dict. Probing uses this dict -- it is the single source of truth. Add new providers there.
 - `free-coding-models` discovers candidates; certification probes validate tool-calling capability through the same provider URLs used in production routing.
 - Wrapper scripts in `bin/` have the frugality.py path hardcoded (set during `install.sh`). If you move the repo, re-run the installer or update the path manually.
 - Cache TTL (discovery): 24 hours; to force fresh discovery, delete `~/.frugality/cache/last-known-good.json`
 - `frugality.py --opencode` flag is referenced by `frugal-opencode` but the OpenCode config path handling is not yet implemented.
+- Claudish is the proxy backend. It replaces the retired Claude Code Router (CCR). No more daemon management, health checks, or config.json routing.

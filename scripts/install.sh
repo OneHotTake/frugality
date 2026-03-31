@@ -17,21 +17,21 @@ if ! command -v python3 &> /dev/null; then
     echo "Error: Python 3 is required but not installed."
     exit 1
 fi
-echo "✓ Python 3: $(python3 --version)"
+echo "OK  Python 3: $(python3 --version)"
 
 # Check Node.js
 if ! command -v node &> /dev/null; then
     echo "Error: Node.js is required but not installed."
     exit 1
 fi
-echo "✓ Node.js: $(node --version)"
+echo "OK  Node.js: $(node --version)"
 
 # Check npm
 if ! command -v npm &> /dev/null; then
     echo "Error: npm is required but not installed."
     exit 1
 fi
-echo "✓ npm: $(npm --version)"
+echo "OK  npm: $(npm --version)"
 
 echo ""
 echo "=========================================="
@@ -43,10 +43,22 @@ echo ""
 if ! command -v free-coding-models &> /dev/null; then
     echo "Installing free-coding-models..."
     npm install -g free-coding-models
-    echo "✓ free-coding-models installed"
+    echo "OK  free-coding-models installed"
 else
-    echo "✓ free-coding-models already installed"
+    echo "OK  free-coding-models already installed"
 fi
+
+# Install Claudish if not already installed
+if ! command -v claudish &> /dev/null; then
+    echo "Installing Claudish..."
+    npm install -g claudish
+    echo "OK  Claudish installed"
+else
+    echo "OK  Claudish already installed"
+fi
+
+# Verify Claudish version
+echo "Claudish version: $(claudish --version 2>/dev/null || echo 'unknown')"
 
 # Auto-update provider URLs from free-coding-models
 echo ""
@@ -57,25 +69,16 @@ echo ""
 echo "Extracting provider endpoints from free-coding-models..."
 node "$SCRIPT_DIR/extract-provider-urls.js" > /tmp/provider-urls.json
 if [ $? -eq 0 ]; then
-    echo "✓ Extracted provider URLs"
+    echo "OK  Extracted provider URLs"
     echo "Updating frugality.py..."
     python3 "$SCRIPT_DIR/update-provider-urls.py" /tmp/provider-urls.json
     if [ $? -eq 0 ]; then
-        echo "✓ Updated provider URLs in frugality.py"
+        echo "OK  Updated provider URLs in frugality.py"
     else
-        echo "⚠ Warning: Failed to update provider URLs"
+        echo "Warning: Failed to update provider URLs"
     fi
 else
-    echo "⚠ Warning: Failed to extract provider URLs"
-fi
-
-# Install Claude Code Router if not already installed
-if ! command -v ccr &> /dev/null; then
-    echo "Installing Claude Code Router..."
-    npm install -g @musistudio/claude-code-router
-    echo "✓ Claude Code Router installed"
-else
-    echo "✓ Claude Code Router already installed"
+    echo "Warning: Failed to extract provider URLs"
 fi
 
 # Verify installations
@@ -86,15 +89,15 @@ echo "=========================================="
 echo ""
 
 echo "free-coding-models: $(which free-coding-models)"
-echo "ccr: $(which ccr)"
+echo "claudish: $(which claudish)"
 
 # Test free-coding-models
 echo ""
 echo "Testing free-coding-models..."
 if free-coding-models --json --hide-unconfigured &> /dev/null; then
-    echo "✓ free-coding-models is working"
+    echo "OK  free-coding-models is working"
 else
-    echo "⚠ Warning: free-coding-models may need configuration"
+    echo "Warning: free-coding-models may need configuration"
 fi
 
 # Create necessary directories
@@ -106,7 +109,7 @@ echo ""
 
 mkdir -p ~/.frugality/cache
 mkdir -p ~/.frugality/logs
-echo "✓ Created ~/.frugality/"
+echo "OK  Created ~/.frugality/"
 
 # Create bin symlinks in ~/bin/
 echo ""
@@ -121,175 +124,126 @@ mkdir -p "$HOME/bin"
 FRUGALITY_PY="$PROJECT_DIR/frugality.py"
 
 # Generate frugal-claude wrapper with hardcoded path
-cat > "$HOME/bin/frugal-claude" << 'WRAPPER_EOF'
+cat > "$HOME/bin/frugal-claude" << WRAPPER_HEADER
 #!/usr/bin/env bash
+set -euo pipefail
 
-# Command line flags
-FLAG_CONNECT=0
-FLAG_RESTART=0
-FLAG_REFRESH=0
+FRUGALITY_PY="$FRUGALITY_PY"
+WRAPPER_HEADER
 
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --connect)
-            FLAG_CONNECT=1
-            shift
-            ;;
-        --restart|--force)
-            FLAG_RESTART=1
-            shift
-            ;;
-        --refresh)
-            FLAG_REFRESH=1
-            shift
-            ;;
-        *)
-            # Pass unknown arguments to claude
-            break
-            ;;
-    esac
-done
+cat >> "$HOME/bin/frugal-claude" << 'WRAPPER_BODY'
 
-if ! command -v python3 &> /dev/null; then
-    echo "Error: python3 is required but not installed."
-    echo "Please install Python 3 and try again."
-    exit 1
-fi
-
-WRAPPER_EOF
-echo "FRUGALITY_PY=\"$FRUGALITY_PY\"" >> "$HOME/bin/frugal-claude"
-cat >> "$HOME/bin/frugal-claude" << 'WRAPPER_EOF'
-
-if [ ! -f "$FRUGALITY_PY" ]; then
-    echo "Error: frugality.py not found at $FRUGALITY_PY"
-    echo "Please ensure Frugality is installed correctly."
-    exit 1
-fi
-
-# Check if CCR is running
-CCR_RUNNING=0
-if command -v ccr &> /dev/null; then
-    CCR_STATUS=$(ccr status 2>/dev/null)
-    if echo "$CCR_STATUS" | grep -q "running\|started"; then
-        CCR_RUNNING=1
-    fi
-fi
-
-# Check config age to bias recommendation
-CONFIG_AGE_MINUTES=999
-if [ -f "$HOME/.claude-code-router/config.json" ]; then
-    CONFIG_MTIME=$(stat -c %Y "$HOME/.claude-code-router/config.json" 2>/dev/null || echo "0")
-    CURRENT_TIME=$(date +%s)
-    CONFIG_AGE_SEC=$((CURRENT_TIME - CONFIG_MTIME))
-    CONFIG_AGE_MINUTES=$((CONFIG_AGE_SEC / 60))
-fi
-
-# Decision logic
-if [ $FLAG_CONNECT -eq 1 ]; then
-    # Connect mode: skip config generation
-    echo "Connecting to existing CCR instance..."
-elif [ $FLAG_RESTART -eq 1 ]; then
-    # Restart mode: update config and restart
-    echo "Updating configuration and restarting CCR..."
-    FRUGALITY_ARGS=""
-    [ $FLAG_REFRESH -eq 1 ] && FRUGALITY_ARGS="--refresh"
-    python3 "$FRUGALITY_PY" $FRUGALITY_ARGS
-    if [ $? -ne 0 ]; then
-        echo "Error: Configuration update failed."
+# --- Dependency check (fail fast) ---
+for cmd in python3 node claudish free-coding-models; do
+    if ! command -v "$cmd" &> /dev/null; then
+        echo "Error: '$cmd' is required but not installed."
+        case "$cmd" in
+            python3)            echo "Install: https://www.python.org/downloads/" ;;
+            node)               echo "Install: https://nodejs.org/" ;;
+            claudish)           echo "Install: npm install -g claudish" ;;
+            free-coding-models) echo "Install: npm install -g free-coding-models" ;;
+        esac
         exit 1
     fi
-    ccr restart &
-    RESTART_PID=$!
-    wait $RESTART_PID 2>/dev/null
-elif [ $CCR_RUNNING -eq 1 ]; then
-    # CCR is running and no flags set - show prompt
-    echo "========================================"
-    echo "Claude Code Router is already running."
-    echo "Config age: ${CONFIG_AGE_MINUTES} minutes"
-    echo ""
+done
 
-    # Bias the prompt based on config age
-    if [ $CONFIG_AGE_MINUTES -lt 5 ]; then
-        echo "Your config is recent (<5 min old)."
-        echo "Recommended: Connect to existing instance"
-        DEFAULT_OPTION=1
-        echo ""
-    else
-        echo "Your config may be stale (>5 min old)."
-        echo "Recommended: Restart with updated configuration"
-        DEFAULT_OPTION=2
-        echo ""
+ENV_FILE="$HOME/.frugality/current_env.sh"
+
+# --- Run model discovery ---
+echo "Running Frugality model discovery..."
+python3 "$FRUGALITY_PY" "$@"
+FRUGALITY_EXIT=$?
+
+if [ $FRUGALITY_EXIT -ne 0 ]; then
+    echo "Error: Frugality configuration failed (exit $FRUGALITY_EXIT)."
+    exit $FRUGALITY_EXIT
+fi
+
+# --- Source the generated env file ---
+if [ ! -f "$ENV_FILE" ]; then
+    echo "Error: Env file not found at $ENV_FILE"
+    exit 1
+fi
+
+# shellcheck source=/dev/null
+source "$ENV_FILE"
+
+if [ -z "${FRUG_CLAUDISH_INVOCATION:-}" ]; then
+    echo "Error: FRUG_CLAUDISH_INVOCATION not set in $ENV_FILE"
+    exit 1
+fi
+
+# --- Launch claudish ---
+echo "Launching Claudish..."
+eval "$FRUG_CLAUDISH_INVOCATION --interactive" "$@"
+WRAPPER_BODY
+
+chmod +x "$HOME/bin/frugal-claude"
+echo "OK  Created ~/bin/frugal-claude"
+
+# Generate frugal-opencode wrapper with hardcoded path (DEPRECATED)
+cat > "$HOME/bin/frugal-opencode" << WRAPPER_HEADER
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "WARNING: frugal-opencode is deprecated. Use frugal-claude with Claudish instead."
+
+FRUGALITY_PY="$FRUGALITY_PY"
+WRAPPER_HEADER
+
+cat >> "$HOME/bin/frugal-opencode" << 'WRAPPER_BODY'
+
+for cmd in python3 node free-coding-models; do
+    if ! command -v "$cmd" &> /dev/null; then
+        echo "Error: '$cmd' is required but not installed."
+        exit 1
     fi
+done
 
-    echo "Options:"
-    echo "  1) Connect to existing instance (no restart)"
-    echo "  2) Restart CCR with updated configuration"
-    echo ""
+ENV_FILE="$HOME/.frugality/current_env.sh"
 
-    # Read user input with timeout
-    read -t 5 -p "Select [1-2] (default: $DEFAULT_OPTION): " choice || true
-
-    if [ -z "$choice" ]; then
-        choice=$DEFAULT_OPTION  # Use default on timeout
-    fi
-
-    case $choice in
-        1)
-            echo "Connecting to existing instance..."
-            ;;
-        2|*)
-            echo "Updating configuration and restarting CCR..."
-            FRUGALITY_ARGS=""
-            [ $FLAG_REFRESH -eq 1 ] && FRUGALITY_ARGS="--refresh"
-            python3 "$FRUGALITY_PY" $FRUGALITY_ARGS
-            if [ $? -ne 0 ]; then
-                echo "Error: Configuration update failed."
-                exit 1
-            fi
-            ccr restart &
-            RESTART_PID=$!
-            wait $RESTART_PID 2>/dev/null
-            ;;
-    esac
+RUN_DISCOVERY=0
+if [ ! -f "$ENV_FILE" ]; then
+    RUN_DISCOVERY=1
 else
-    # CCR not running - normal startup
-    echo "Running Frugality configuration..."
-    FRUGALITY_ARGS=""
-    [ $FLAG_REFRESH -eq 1 ] && FRUGALITY_ARGS="--refresh"
-    python3 "$FRUGALITY_PY" $FRUGALITY_ARGS
-    FRUGALITY_EXIT=$?
-
-    if [ $FRUGALITY_EXIT -ne 0 ]; then
-        echo "Error: Frugality configuration failed."
-        exit $FRUGALITY_EXIT
-    fi
-
-    if command -v ccr &> /dev/null; then
-        CCR_STATUS=$(ccr status 2>/dev/null)
-        if ! echo "$CCR_STATUS" | grep -q "running\|started"; then
-            echo "Starting CCR..."
-            ccr start &
-            START_PID=$!
-            wait $START_PID 2>/dev/null
-        fi
+    ENV_MTIME=$(stat -c %Y "$ENV_FILE" 2>/dev/null || echo "0")
+    CURRENT_TIME=$(date +%s)
+    AGE_SEC=$((CURRENT_TIME - ENV_MTIME))
+    if [ "$AGE_SEC" -gt 3600 ]; then
+        RUN_DISCOVERY=1
     fi
 fi
 
-# Wait for CCR to be healthy
-for i in {1..8}; do
-    if curl -s http://localhost:3456 > /dev/null 2>&1; then
-        break
+if [ "$RUN_DISCOVERY" -eq 1 ]; then
+    echo "Running Frugality model discovery..."
+    python3 "$FRUGALITY_PY" "$@"
+    if [ $? -ne 0 ]; then
+        echo "Error: Frugality configuration failed."
+        exit 1
     fi
-    if [ $i -eq 8 ]; then
-        echo "Warning: CCR failed to start or respond to health checks."
-        echo "You may need to start it manually or check the logs."
-    fi
-    sleep 2
-done
+else
+    echo "Using cached env config."
+fi
 
-export ANTHROPIC_BASE_URL="http://127.0.0.1:3456"
-exec claude "$@"
-WRAPPER_EOF
+echo "Configuring OpenCode..."
+free-coding-models --opencode --tier S
+exec opencode "$@"
+WRAPPER_BODY
 
-# Generate frugal-opencode wrapper with hardcoded path
+chmod +x "$HOME/bin/frugal-opencode"
+echo "OK  Created ~/bin/frugal-opencode (DEPRECATED)"
+
+echo ""
+echo "=========================================="
+echo "  Running Initial Discovery"
+echo "=========================================="
+echo ""
+
+# Run initial model discovery to populate env file
+python3 "$PROJECT_DIR/frugality.py"
+echo ""
+echo "Installation complete!"
+echo ""
+echo "Usage:"
+echo "  frugal-claude        # Launch Claude Code via Claudish with free models"
+echo "  frugal-opencode      # (DEPRECATED) Launch OpenCode with free models"

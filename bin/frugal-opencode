@@ -1,26 +1,56 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-if ! command -v python3 &> /dev/null; then
-    echo "Error: python3 is required but not installed."
-    echo "Please install Python 3 and try again."
-    exit 1
+# ============================================================
+# frugal-opencode — Launch OpenCode with free-tier models
+# NOTE: This script is deprecated. OpenCode support is frozen.
+# It remains here for backward compatibility but will not
+# receive new features. Use frugal-claude + Claudish instead.
+# ============================================================
+
+echo "WARNING: frugal-opencode is deprecated. Use frugal-claude with Claudish instead."
+echo ""
+
+# --- Dependency check (fail fast) ---
+for cmd in python3 node free-coding-models; do
+    if ! command -v "$cmd" &> /dev/null; then
+        echo "Error: '$cmd' is required but not installed."
+        exit 1
+    fi
+done
+
+FRUGALITY_PY="/home/onehottake/Projects/frugality/frugality.py"
+ENV_FILE="$HOME/.frugality/current_env.sh"
+
+# Run model discovery if env file is missing or older than 1 hour
+RUN_DISCOVERY=0
+if [ ! -f "$ENV_FILE" ]; then
+    RUN_DISCOVERY=1
+else
+    ENV_MTIME=$(stat -c %Y "$ENV_FILE" 2>/dev/null || echo "0")
+    CURRENT_TIME=$(date +%s)
+    AGE_SEC=$((CURRENT_TIME - ENV_MTIME))
+    if [ "$AGE_SEC" -gt 3600 ]; then
+        RUN_DISCOVERY=1
+    fi
 fi
 
-FRUGALITY_PY="/home/onehottake/frugality/frugality.py"
-
-if [ ! -f "$FRUGALITY_PY" ]; then
-    echo "Error: frugality.py not found at $FRUGALITY_PY"
-    echo "Please ensure Frugality is installed correctly."
-    exit 1
+if [ "$RUN_DISCOVERY" -eq 1 ]; then
+    echo "Running Frugality model discovery..."
+    python3 "$FRUGALITY_PY" "$@"
+    if [ $? -ne 0 ]; then
+        echo "Error: Frugality configuration failed."
+        exit 1
+    fi
+else
+    echo "Using cached env config (less than 1 hour old)."
 fi
 
-echo "Running Frugality configuration..."
-python3 "$FRUGALITY_PY" --opencode
-FRUGALITY_EXIT=$?
-
-if [ $FRUGALITY_EXIT -ne 0 ]; then
-    echo "Error: Frugality configuration failed."
-    exit $FRUGALITY_EXIT
+# Use free-coding-models to configure OpenCode natively
+echo "Configuring OpenCode..."
+free-coding-models --opencode --tier S
+if [ $? -ne 0 ]; then
+    echo "Warning: OpenCode configuration failed. Attempting to launch anyway."
 fi
 
 exec opencode "$@"

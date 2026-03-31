@@ -2,19 +2,22 @@
 
 > Claude Code. Free models. Zero compromise.
 
-Claude Code is the best AI coding agent out there. It's also expensive when it's reading files, searching code, and doing background busywork. Frugality fixes that — it auto-discovers the best free-tier models and routes the boring stuff there, so Claude's quota goes toward the things only Claude can do.
+> **v1.0.0 -> v2.0.0 Migration:** CCR has been retired. Run `npm uninstall -g @musistudio/claude-code-router`
+> to clean up. The `frugal-claude` command now uses Claudish as its proxy backend.
+
+Claude Code is the best AI coding agent out there. It's also expensive when it's reading files, searching code, and doing background busywork. Frugality fixes that -- it auto-discovers the best free-tier models and routes the boring stuff there, so Claude's quota goes toward the things only Claude can do.
 
 ## How it works
 
 ```
 frugal-claude
-    ↓
-frugality.py  →  free-coding-models --json  →  map to tiers  →  write CCR config
-    ↓
-ccr restart  →  claude
+    |
+frugality.py  ->  free-coding-models --json  ->  map to tiers  ->  write env file
+    |
+claudish --model <best-model> --interactive  ->  Claude Code
 ```
 
-Every time you launch, it finds the best available free models and updates [Claude Code Router](https://github.com/musistudio/claude-code-router) automatically. You just type `frugal-claude` instead of `claude`.
+Every time you launch, it finds the best available free models and writes `~/.frugality/current_env.sh` for [Claudish](https://github.com/MadAppGang/claudish) to consume. You just type `frugal-claude` instead of `claude`.
 
 ## Routing tiers
 
@@ -27,79 +30,13 @@ Every time you launch, it finds the best available free models and updates [Clau
 
 Claude Code picks the right slot per task. You never touch the config.
 
-## Interactive Model Selection
-
-Frugality now shows which models it's using and lets you control them:
-
-```bash
-frugal-claude  # Shows current models + 3 options with 3s timeout
-```
-
-When Claude Code Router is already running, you'll see:
-
-```
-==================================================
-Current Model Selection
-==================================================
-default (S)      → nvidia/moonshotai/kimi-k2-thinking [S+] 256k
-background (A)   → nvidia/nvidia/llama-3.3-nemotron-super-49b-v1.5 [A] 128k
-think            → nvidia/moonshotai/kimi-k2-thinking [S+] 256k
-longContext      → nvidia/moonshotai/kimi-k2-thinking [S+] 256k
-==================================================
-Options:
-[1] ✓ Accept & Launch (timeout in 3s)
-[2] ♻️  Refresh from providers
-[3] ✎ Edit model assignments
-Selection [1-3]:
-```
-
-**What each option does:**
-
-- **Accept & Launch** (default on timeout): Use the current model selection
-- **Refresh**: Discover new models from providers and re-run certification
-- **Edit**: Open the per-tier model editor to change individual assignments
-
-### Manual Flags
-
-You can also trigger these actions directly:
-
-```bash
-frugal-claude --prompt     # Show interactive prompt (asks what to do)
-frugal-claude --edit       # Open model editor directly
-frugal-claude --refresh    # Refresh models, then launch
-```
-
-### Model Selection Cache
-
-Your choices are saved to `~/.frugality/cache/selected_models.json` and persist across launches. This enables fast startups without re-probing providers.
-
-### Per-Tier Editor
-
-The editor lets you pick specific models for each routing tier:
-
-```
-==================================================
-Edit Model Assignments
-==================================================
-Current assignments:
-[1] default    → nvidia/moonshotai/kimi-k2-thinking [S+] 256k
-[2] background → nvidia/nvidia/llama-3.3-nemotron-super-49b-v1.5 [A] 128k
-[3] think      → nvidia/moonshotai/kimi-k2-thinking [S+] 256k
-[4] longContext→ nvidia/moonshotai/kimi-k2-thinking [S+] 256k
-==================================================
-[1-4] Change assignment | [5] Save & Exit | [6] Cancel
-Selection:
-```
-
-Pick a tier, then choose from all certified models. Changes are saved to the cache immediately.
-
 ## Install
 
 **Prerequisites:** Python 3.7+, Node.js 18+, [Claude Code](https://claude.ai/code)
 
 ```bash
 # 1. Install the model tools
-npm install -g free-coding-models @musistudio/claude-code-router
+npm install -g free-coding-models claudish
 
 # 2. Clone and install frugality
 git clone https://github.com/OneHotTake/frugality.git
@@ -110,14 +47,14 @@ cd frugality
 free-coding-models
 ```
 
-The installer drops `frugal-claude` and `frugal-opencode` into `~/bin/`. Make sure that's in your `$PATH`.
+The installer drops `frugal-claude` into `~/bin/`. Make sure that's in your `$PATH`.
 
 ## Usage
 
 ```bash
-frugal-claude        # update config + launch Claude Code
-frugal-opencode      # update config + launch OpenCode
-python3 frugality.py # update CCR config only, don't launch anything
+frugal-claude        # discover models + launch Claude Code via Claudish
+frugal-opencode      # (DEPRECATED) configure OpenCode + launch
+python3 frugality.py # discover models and write env file only
 ```
 
 ## API keys
@@ -130,20 +67,26 @@ Keys live in `~/.free-coding-models.json`. Run `free-coding-models` once and it'
 # Nothing working?
 free-coding-models --json          # verify model discovery works
 cat ~/.free-coding-models.json     # verify keys are there
-ccr status                         # verify router is running
-tail -f ~/.claude-code-router/logs/ccr-*.log  # see what CCR is doing
+claudish --version                 # verify Claudish is installed
+cat ~/.frugality/current_env.sh    # check generated env file
 
 # Force fresh model discovery (skip 24h cache)
 rm ~/.frugality/cache/last-known-good.json
+
+# Force fresh certification
+python3 frugality.py --refresh
 ```
+
+## Call Classification
+
+Frugality includes a `classify_call_weight()` function that detects lightweight API calls (quota checks, topic detection) vs heavy coding calls. This allows future routing optimizations where short, tool-free requests can be sent to cheaper models.
 
 ## Roadmap
 
-- `--dry-run` — preview config without writing
-- `--tier` — override model tier selection
-- `frug doctor` — one-command diagnostics
-- Watchdog mode — auto-refresh when a model's latency tanks
-- Safe restart — defer CCR restart during active sessions
+- `--dry-run` -- preview env config without writing
+- `--tier` -- override model tier selection
+- `frug doctor` -- one-command diagnostics
+- Watchdog mode -- auto-refresh when a model's latency tanks
 
 ## License
 

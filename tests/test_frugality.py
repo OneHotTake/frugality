@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Unit tests for frugality.py certification gate.
+Unit tests for frugality.py certification gate and Claudish env output.
 """
 import json
 import os
@@ -37,6 +37,31 @@ class TestNormalization(unittest.TestCase):
         key1 = frugality.registry_key("nvidia", "llama")
         key2 = frugality.registry_key("NVIDIA", "llama")
         self.assertEqual(key1, key2)
+
+
+class TestClassifyCallWeight(unittest.TestCase):
+    """Test call classification function."""
+
+    def test_lightweight_short_no_tools(self):
+        self.assertEqual(frugality.classify_call_weight(1, False, 100), "lightweight")
+
+    def test_heavy_multi_message_tools(self):
+        self.assertEqual(frugality.classify_call_weight(5, True, 2000), "heavy")
+
+    def test_lightweight_edge_max_params(self):
+        self.assertEqual(frugality.classify_call_weight(2, False, 499), "lightweight")
+
+    def test_heavy_too_many_messages(self):
+        self.assertEqual(frugality.classify_call_weight(3, False, 100), "heavy")
+
+    def test_heavy_has_tools(self):
+        self.assertEqual(frugality.classify_call_weight(1, True, 100), "heavy")
+
+    def test_heavy_long_prompt(self):
+        self.assertEqual(frugality.classify_call_weight(1, False, 500), "heavy")
+
+    def test_lightweight_single_message_short(self):
+        self.assertEqual(frugality.classify_call_weight(1, False, 10), "lightweight")
 
 
 class TestRegistryHelpers(unittest.TestCase):
@@ -166,6 +191,68 @@ class TestRegistryHelpers(unittest.TestCase):
         self.assertEqual(model["modelId"], "model")
 
 
+class TestEnvFileOutput(unittest.TestCase):
+    """Test env file generation."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.original_env_file = frugality.ENV_OUTPUT_FILE
+        frugality.ENV_OUTPUT_FILE = os.path.join(self.temp_dir, "current_env.sh")
+
+    def tearDown(self):
+        frugality.ENV_OUTPUT_FILE = self.original_env_file
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_write_env_file_creates_file(self):
+        selected = {
+            "default": {"modelId": "model-a", "provider": "openrouter", "tier": "S+", "context": "128k"},
+            "background": {"modelId": "model-b", "provider": "groq", "tier": "A", "context": "32k"},
+            "think": None,
+            "longContext": None,
+        }
+        best = {"modelId": "model-a", "provider": "openrouter", "tier": "S+"}
+        frugality.write_env_file(selected, best)
+        self.assertTrue(os.path.exists(frugality.ENV_OUTPUT_FILE))
+
+    def test_write_env_file_content(self):
+        selected = {
+            "default": {"modelId": "model-a", "provider": "openrouter", "tier": "S+", "context": "128k"},
+            "background": {"modelId": "model-b", "provider": "groq", "tier": "A", "context": "32k"},
+            "think": None,
+            "longContext": None,
+        }
+        best = {"modelId": "model-a", "provider": "openrouter", "tier": "S+"}
+        frugality.write_env_file(selected, best)
+
+        with open(frugality.ENV_OUTPUT_FILE) as f:
+            content = f.read()
+
+        self.assertIn('FRUG_DEFAULT_MODEL="model-a"', content)
+        self.assertIn('FRUG_BACKGROUND_MODEL="model-b"', content)
+        self.assertIn('FRUG_ACTIVE_PROVIDER="openrouter"', content)
+        self.assertIn("claudish --model openrouter@model-a", content)
+
+    def test_select_best_openrouter_prefers_openrouter(self):
+        certified = [
+            {"modelId": "model-a", "provider": "groq", "tier": "S+"},
+            {"modelId": "model-b", "provider": "openrouter", "tier": "S"},
+        ]
+        result = frugality._select_best_openrouter_model(certified)
+        self.assertEqual(result["provider"], "openrouter")
+
+    def test_select_best_openrouter_falls_back(self):
+        certified = [
+            {"modelId": "model-a", "provider": "groq", "tier": "S+"},
+        ]
+        result = frugality._select_best_openrouter_model(certified)
+        self.assertEqual(result["provider"], "groq")
+
+    def test_select_best_openrouter_empty(self):
+        result = frugality._select_best_openrouter_model([])
+        self.assertIsNone(result)
+
+
 class TestDefaultMode(unittest.TestCase):
     """Test default mode behavior."""
 
@@ -174,23 +261,26 @@ class TestDefaultMode(unittest.TestCase):
         self.temp_dir = tempfile.mkdtemp()
         self.original_cert_registry = frugality.CERT_REGISTRY_FILE
         frugality.CERT_REGISTRY_FILE = os.path.join(self.temp_dir, "cert.json")
+        self.original_env_file = frugality.ENV_OUTPUT_FILE
+        frugality.ENV_OUTPUT_FILE = os.path.join(self.temp_dir, "current_env.sh")
 
     def tearDown(self):
         """Clean up."""
         frugality.CERT_REGISTRY_FILE = self.original_cert_registry
+        frugality.ENV_OUTPUT_FILE = self.original_env_file
         import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    @mock.patch("frugality.update_ccr_config")
-    def test_default_mode_empty_registry(self, mock_update):
+    @mock.patch("frugality.write_env_file")
+    def test_default_mode_empty_registry(self, mock_write):
         """Default mode returns False with guidance when registry is empty."""
         result = frugality.run_default_mode({})
         self.assertFalse(result)
-        mock_update.assert_not_called()
+        mock_write.assert_not_called()
 
-    @mock.patch("frugality.update_ccr_config")
-    def test_default_mode_calls_update_with_certified(self, mock_update):
-        """Default mode calls update_ccr_config with certified models."""
+    @mock.patch("frugality.write_env_file")
+    def test_default_mode_writes_env_file(self, mock_write):
+        """Default mode writes env file with certified models."""
         registry = {
             "schema_version": frugality.CERT_SCHEMA_VERSION,
             "probe_version": frugality.PROBE_VERSION,
@@ -211,14 +301,9 @@ class TestDefaultMode(unittest.TestCase):
         with open(frugality.CERT_REGISTRY_FILE, "w") as f:
             json.dump(registry, f)
 
-        mock_update.return_value = True
         result = frugality.run_default_mode({})
         self.assertTrue(result)
-        mock_update.assert_called_once()
-        # Verify certified model was passed
-        args = mock_update.call_args[0]
-        self.assertEqual(len(args[0]), 1)
-        self.assertEqual(args[0][0]["modelId"], "model")
+        mock_write.assert_called_once()
 
 
 class TestRefreshMode(unittest.TestCase):
@@ -229,20 +314,23 @@ class TestRefreshMode(unittest.TestCase):
         self.temp_dir = tempfile.mkdtemp()
         self.original_cert_registry = frugality.CERT_REGISTRY_FILE
         frugality.CERT_REGISTRY_FILE = os.path.join(self.temp_dir, "cert.json")
+        self.original_env_file = frugality.ENV_OUTPUT_FILE
+        frugality.ENV_OUTPUT_FILE = os.path.join(self.temp_dir, "current_env.sh")
 
     def tearDown(self):
         """Clean up."""
         frugality.CERT_REGISTRY_FILE = self.original_cert_registry
+        frugality.ENV_OUTPUT_FILE = self.original_env_file
         import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     @mock.patch("frugality.run_probes")
     @mock.patch("frugality.get_fcm_data_with_cache")
-    @mock.patch("frugality.update_ccr_config")
+    @mock.patch("frugality.write_env_file")
     def test_refresh_discovers_and_probes(
-        self, mock_update, mock_fcm, mock_probes
+        self, mock_write, mock_fcm, mock_probes
     ):
-        """Refresh mode discovers, probes, and updates config."""
+        """Refresh mode discovers, probes, and writes env file."""
         candidates = [
             {"modelId": "model1", "provider": "test", "tier": "S+", "context": "100k"}
         ]
@@ -264,13 +352,13 @@ class TestRefreshMode(unittest.TestCase):
                 }
             },
         }
-        mock_update.return_value = True
+        mock_write.return_value = None
 
         result = frugality.run_refresh_mode({})
         self.assertTrue(result)
         mock_fcm.assert_called_once()
         mock_probes.assert_called_once()
-        mock_update.assert_called_once()
+        mock_write.assert_called_once()
 
     @mock.patch("frugality.get_fcm_data_with_cache")
     def test_refresh_returns_false_no_candidates(self, mock_fcm):
@@ -286,7 +374,6 @@ class TestProbeModel(unittest.TestCase):
     @mock.patch("frugality._make_chat_request_with_retry")
     def test_probe_successful_certification(self, mock_request):
         """Probe returns 'certified' on successful tool roundtrip."""
-        # Step 1+2: tool call response
         tool_call = {
             "id": "call_123",
             "function": {"name": "echo_number", "arguments": '{"value": 7}'},
@@ -302,7 +389,6 @@ class TestProbeModel(unittest.TestCase):
                     }
                 ]
             },
-            # Step 3: roundtrip response
             {
                 "choices": [
                     {
@@ -427,7 +513,6 @@ class TestProbeModel(unittest.TestCase):
                     }
                 ]
             },
-            # Roundtrip: model makes another tool call (loop)
             {
                 "choices": [
                     {
@@ -461,7 +546,6 @@ class TestProbeModel(unittest.TestCase):
                     }
                 ]
             },
-            # Roundtrip: model ignores result (no "49" in response)
             {
                 "choices": [
                     {
@@ -495,7 +579,6 @@ class TestProbeModel(unittest.TestCase):
                     }
                 ]
             },
-            # Roundtrip: empty response
             {"choices": [{"message": {"content": None, "tool_calls": None}}]},
         ]
         result = frugality.probe_model("test", "model", {"apiKeys": {"test": "key"}})
