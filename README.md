@@ -27,6 +27,72 @@ Every time you launch, it finds the best available free models and updates [Clau
 
 Claude Code picks the right slot per task. You never touch the config.
 
+## Interactive Model Selection
+
+Frugality now shows which models it's using and lets you control them:
+
+```bash
+frugal-claude  # Shows current models + 3 options with 3s timeout
+```
+
+When Claude Code Router is already running, you'll see:
+
+```
+==================================================
+Current Model Selection
+==================================================
+default (S)      → nvidia/moonshotai/kimi-k2-thinking [S+] 256k
+background (A)   → nvidia/nvidia/llama-3.3-nemotron-super-49b-v1.5 [A] 128k
+think            → nvidia/moonshotai/kimi-k2-thinking [S+] 256k
+longContext      → nvidia/moonshotai/kimi-k2-thinking [S+] 256k
+==================================================
+Options:
+[1] ✓ Accept & Launch (timeout in 3s)
+[2] ♻️  Refresh from providers
+[3] ✎ Edit model assignments
+Selection [1-3]:
+```
+
+**What each option does:**
+
+- **Accept & Launch** (default on timeout): Use the current model selection
+- **Refresh**: Discover new models from providers and re-run certification
+- **Edit**: Open the per-tier model editor to change individual assignments
+
+### Manual Flags
+
+You can also trigger these actions directly:
+
+```bash
+frugal-claude --prompt     # Show interactive prompt (asks what to do)
+frugal-claude --edit       # Open model editor directly
+frugal-claude --refresh    # Refresh models, then launch
+```
+
+### Model Selection Cache
+
+Your choices are saved to `~/.frugality/cache/selected_models.json` and persist across launches. This enables fast startups without re-probing providers.
+
+### Per-Tier Editor
+
+The editor lets you pick specific models for each routing tier:
+
+```
+==================================================
+Edit Model Assignments
+==================================================
+Current assignments:
+[1] default    → nvidia/moonshotai/kimi-k2-thinking [S+] 256k
+[2] background → nvidia/nvidia/llama-3.3-nemotron-super-49b-v1.5 [A] 128k
+[3] think      → nvidia/moonshotai/kimi-k2-thinking [S+] 256k
+[4] longContext→ nvidia/moonshotai/kimi-k2-thinking [S+] 256k
+==================================================
+[1-4] Change assignment | [5] Save & Exit | [6] Cancel
+Selection:
+```
+
+Pick a tier, then choose from all certified models. Changes are saved to the cache immediately.
+
 ## Install
 
 **Prerequisites:** Python 3.7+, Node.js 18+, [Claude Code](https://claude.ai/code)
