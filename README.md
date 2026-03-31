@@ -205,19 +205,6 @@ cat ~/.config/free-claude-code/.env
 
 ---
 
-## 🔄 Migration from CCR
-
-If you're coming from CCR:
-```bash
-# Uninstall old version
-npm uninstall -g @musistudio/claude-code-router
-
-# Install new backend
-uv tool install git+https://github.com/Alishahryar1/free-claude-code.git
-
-# Setup frugality
-./scripts/install.sh
-```
 
 ---
 
