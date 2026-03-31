@@ -2,63 +2,94 @@
 
 > Claude Code. Free models. Zero compromise.
 
-> **v1.0.0 -> v2.0.0 Migration:** CCR has been retired. Run `npm uninstall -g @musistudio/claude-code-router`
-> to clean up. The `claude-frugal` command now uses Claudish as its proxy backend.
+## Fast Start
 
-Claude Code is the best AI coding agent out there. It's also expensive when it's reading files, searching code, and doing background busywork. Frugality fixes that -- it auto-discovers the best free-tier models and routes the boring stuff there, so Claude's quota goes toward the things only Claude can do.
+Already have Claude Code? One command:
+
+```bash
+npx frugality
+```
+
+That's it. It discovers free models, picks the best ones, and launches Claude Code through them. You'll be coding in ~30 seconds.
+
+---
 
 ## How it works
 
 ```
 claude-frugal
     |
-frugality.py  ->  free-coding-models --json  ->  map to tiers  ->  write env file
+frugality.py  ->  free-coding-models --json  ->  certify & tier  ->  write env file
     |
-claudish --model <best-model> --interactive  ->  Claude Code
+claudish --model <best-free-model> --interactive  ->  Claude Code
 ```
 
-Every time you launch, it finds the best available free models and writes `~/.frugality/current_env.sh` for [Claudish](https://github.com/MadAppGang/claudish) to consume. You just type `claude-frugal` instead of `claude`.
+Every launch discovers the best available free models and configures [Claudish](https://github.com/MadAppGang/claudish) to proxy them. Just type `claude-frugal` instead of `claude`.
 
 ## Routing tiers
 
-| Route | Model tier | Used for |
-|-------|-----------|----------|
-| `default` | S-tier (60-70% SWE) | General coding |
-| `background` | A-tier (40-60%) | File reads, searches, busywork |
-| `think` | Reasoning model (R1, etc.) | Plan mode, hard bugs |
-| `longContext` | >32K context | Big files, log analysis |
+| Tier | Models | Used for |
+|------|--------|----------|
+| **default** | S/S+ (60-70% SWE) | General coding |
+| **background** | A+/A (40-60%) | File reads, searches, busywork |
+| **think** | Reasoning (R1, etc.) | Plan mode, hard bugs |
+| **longContext** | >32K context | Big files, log analysis |
 
 Claude Code picks the right slot per task. You never touch the config.
 
+---
+
 ## Install
 
-**Prerequisites:** Python 3.7+, Node.js 18+, [Claude Code](https://claude.ai/code)
+### What you need
+
+| Dependency | Why | Install |
+|-----------|-----|---------|
+| Python 3.7+ | Core engine | [python.org](https://www.python.org/downloads/) |
+| Node.js 18+ | Model discovery tools | [nodejs.org](https://nodejs.org/) |
+| [Claude Code](https://claude.ai/code) | What you're making cheaper | Official installer |
+
+### Step 1: Model discovery (required)
 
 ```bash
-# 1. Install the model tools
-npm install -g free-coding-models claudish
+npm install -g free-coding-models
+free-coding-models   # interactive -- walks you through API key setup
+```
 
-# 2. Clone and install frugality
+This discovers what free models are available from 16+ providers (Groq, Cerebras, SambaNova, NVIDIA, OpenRouter, etc.). You'll set up API keys once.
+
+### Step 2: Claudish proxy (required)
+
+```bash
+npm install -g claudish
+```
+
+Claudish is the proxy that sits between Claude Code and the free models. It handles protocol compliance so Claude Code doesn't know it's not talking to Anthropic directly.
+
+### Step 3: Frugality
+
+```bash
 git clone https://github.com/OneHotTake/frugality.git
 cd frugality
 ./scripts/install.sh
-
-# 3. Set up your API keys (interactive)
-free-coding-models
 ```
 
 The installer drops `claude-frugal` into `~/bin/`. Make sure that's in your `$PATH`.
 
+### Verify
+
+```bash
+claude-frugal         # should discover models and launch
+```
+
+---
+
 ## Usage
 
 ```bash
-claude-frugal         # discover models + launch Claude Code via Claudish
-python3 frugality.py  # discover models and write env file only
+claude-frugal         # discover models + launch Claude Code
+python3 frugality.py  # discover models and write env file only (no launch)
 ```
-
-## API keys
-
-Keys live in `~/.free-coding-models.json`. Run `free-coding-models` once and it'll walk you through setup. Frugality supports [16 providers](frugality.py) including Groq, Cerebras, SambaNova, NVIDIA NIM, and OpenRouter.
 
 ## Troubleshooting
 
@@ -76,13 +107,9 @@ rm ~/.frugality/cache/last-known-good.json
 python3 frugality.py --refresh
 ```
 
-## Call Classification
-
-Frugality includes a `classify_call_weight()` function that detects lightweight API calls (quota checks, topic detection) vs heavy coding calls. This allows future routing optimizations where short, tool-free requests can be sent to cheaper models.
-
 ## Roadmap
 
-- `--dry-run` -- preview env config without writing
+- `--dry-run` -- preview config without writing
 - `--tier` -- override model tier selection
 - `frug doctor` -- one-command diagnostics
 - Watchdog mode -- auto-refresh when a model's latency tanks
