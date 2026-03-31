@@ -89,6 +89,31 @@ def get_model_display_name(model_id):
     # Split on / and take last part
     return model_id.split("/")[-1]
 
+def get_provider_display_name(model_id):
+    """Get simplified provider name from model_id."""
+    # Extract provider prefix
+    for provider, prefix in PROVIDER_PREFIXES.items():
+        if model_id.startswith(prefix + "/"):
+            # Return simplified name
+            return {
+                "open_router": "openrouter",
+                "nvidia_nim": "nvidia",
+                "cerebras": "cerebras",
+                "sambanova": "sambanova",
+                "deepinfra": "deepinfra",
+                "siliconflow": "siliconflow",
+                "scaleway": "scaleway",
+                "qwen": "qwen",
+                "iflow": "iflow"
+            }.get(prefix, provider)
+
+    # Fallback - extract from model_id
+    parts = model_id.split("/")
+    if len(parts) > 1:
+        return parts[0].replace("_", "")
+
+    return "unknown"
+
 def classify_call_weight(message_count, has_tools, prompt_length):
     """Classify call weight for smart routing."""
     if message_count <= 2 and not has_tools and prompt_length < 500:
@@ -583,11 +608,15 @@ def run_probes(candidates: list, registry: dict, credentials: dict) -> dict:
             result["uptime"] = m.get("uptime", 100)
             result["label"] = m.get("label", model_id)
             results.append((m, result))
+            # Get provider and model display names
+            provider_display = get_provider_display_name(f"{provider_name}/{model_id}")
+            model_display = get_model_display_name(f"{provider_name}/{model_id}")
+
             status_str = {
                 "certified": "OK",
                 "skipped": f"SKIPPED ({result.get('failure_reason', '?')})",
             }.get(result["status"], f"FAIL ({result.get('failure_reason', '?')})")
-            print(f" {provider_name}/{model_id}: {status_str}")
+            print(f" {provider_display}/{model_display}: {status_str}")
         return results
 
     # Use ThreadPoolExecutor to parallelize across providers
@@ -661,11 +690,15 @@ def format_model_display(model_data, full=False):
     tier = model_data.get("tier", "")
     context = model_data.get("context", "")
 
+    # Get simplified provider name
+    full_model_id = normalize_model_id(provider, model_id)
+    provider_name = get_provider_display_name(full_model_id)
+    model_name = get_model_display_name(full_model_id)
+
     if full:
-        return f"{provider}/{model_id} ({tier}, {context})"
+        return f"{provider_name}/{model_name} ({tier}, {context})"
     else:
-        display_name = get_model_display_name(f"{provider}/{model_id}")
-        return f"{provider}/{display_name} ({tier})"
+        return f"{provider_name}/{model_name} ({tier})"
 
 def save_selection_cache(routes):
     """Save model selections to cache file."""
@@ -972,12 +1005,18 @@ def print_summary(selected_models, available_providers):
     else:
         print("❌ No providers configured")
 
-    # Print model assignments
+    # Print model assignments with provider info
     for slot in ["MODEL_OPUS", "MODEL_SONNET", "MODEL_HAIKU", "MODEL"]:
         if slot in selected_models:
             model = selected_models[slot]
             model_id = normalize_model_id(model["provider"], model["modelId"])
-            display_name = get_model_display_name(model_id)
+
+            # Get provider and model display names
+            provider_name = get_provider_display_name(model_id)
+            model_name = get_model_display_name(model_id)
+
+            # Format as provider/model
+            display = f"{provider_name}/{model_name}"
 
             # Get tier
             tier = model.get("tier", "unknown")
@@ -989,7 +1028,7 @@ def print_summary(selected_models, available_providers):
             if any(keyword in model_lower for keyword in ["kimi", "nemotron", "deepseek-r1", "qwq"]):
                 thinking = " 🧠"
 
-            print(f"{slot:<12} → {display_name:<25} {tier_emoji} {thinking}")
+            print(f"{slot:<12} → {display:<35} {tier_emoji} {thinking}")
 
     print("=" * 50)
     print("💡 Tip: Run 'claude-frugal' to start coding with free models!")

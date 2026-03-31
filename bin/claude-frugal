@@ -73,7 +73,7 @@ fi
 # ── Show active models ─────────────────────────────────────────────
 echo ""
 echo "📋 Active Models:"
-grep -E '^MODEL' "$CC_NIM_ENV" | sed 's/^/  /' | sed 's/="/ → /' | sed 's/"$//'
+grep -E '^MODEL' "$CC_NIM_ENV" | sed 's/^/  /' | sed 's/=\"/ → /' | sed 's/"$//' | sed 's|/|/|'
 
 # ── Launch! ───────────────────────────────────────────────────────
 echo ""

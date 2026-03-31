@@ -6,6 +6,12 @@
 
 ---
 
+⚠️ **WARNING**: This project is currently under heavy development and may break at any time. Use at your own risk!
+
+---
+
+---
+
 ## 🚀 Quick Start
 
 Clone and install in one command:
@@ -130,12 +136,12 @@ claude-frugal --timeout 5  # 5-second timeout for prompt
 🚀 Frugality - Claude Code on Free Models
 
 🔍 Discovering models...
-✅ Providers available: openrouter, groq
+✅ Providers available: openrouter, groq, nvidia
 
 📋 Active Models:
-  MODEL_OPUS     → deepseek-v3           ⭐
-  MODEL_SONNET   → qwen-3.5             🌟
-  MODEL_HAIKU    → mistral-large        💪
+  MODEL_OPUS     → openrouter/deepseek-v3     ⭐
+  MODEL_SONNET   → groq/qwen-3.5              🌟
+  MODEL_HAIKU    → nvidia/mistral-large       💪
 
 🎯 Starting Claude Code...
 ```
@@ -164,6 +170,19 @@ claude-frugal --timeout 5  # 5-second timeout for prompt
  [1] ✅ Accept & Launch (timeout in 3s)
  [2] 🔄 Refresh from providers
  [3] ✏️  Edit model assignments
+```
+
+### Interactive Edit Mode Example
+
+```
+📋 Available models for 'Default (S)':
+ [1] groq/qwen-3.5 (S, 128k) ← CURRENT
+ [2] openrouter/qwen-3.5 (S, 128k)
+ [3] nvidia/qwen-3.5 (S, 128k)
+ [4] openrouter/deepseek-v3 (S+, 200k)
+
+Select model for Default: 2
+✅ Updated Default assignment
 ```
 
 ---
@@ -245,7 +264,7 @@ cat ~/.config/free-claude-code/.env
 - **Model testing**: Probes each model with real tool calls to verify capability
 - **Quality-based routing**: Picks S+ models for complex tasks, S for coding, A for quick checks
 - **Multi-provider support**: Works with any provider in free-coding-models
-- **Clean display**: Shows exactly which model is handling each task type
+- **Provider display**: Shows provider and model (e.g., "openrouter/qwen-3.5")
 - **Interactive selection**: Choose between providers when same model is available
 - **Selection caching**: Remembers your choices for faster launches
 
