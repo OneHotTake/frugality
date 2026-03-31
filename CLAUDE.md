@@ -55,10 +55,6 @@ All providers are supported with proper prefixes:
 - Active model display
 - Launches `fcc` proxy
 
-### `bin/frugal-opencode`
-- Launches OpenCode natively
-- Uses same model discovery
-- No proxy needed for OpenCode
 
 ### `scripts/install.sh`
 - Delightful installation flow

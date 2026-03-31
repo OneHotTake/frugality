@@ -63,12 +63,11 @@ echo "📁 Setting up directories..."
 mkdir -p ~/.frugality/{cache,logs}
 mkdir -p "$HOME/bin" 2>/dev/null || true
 
-# ── Create wrappers ───────────────────────────────────────────────
-echo "🔧 Creating command wrappers..."
+# ── Create wrapper ────────────────────────────────────────────────
+echo "🔧 Creating claude-frugal wrapper..."
 
 FRUGALITY_PY="$PROJECT_DIR/frugality.py"
 
-# Create claude-frugal
 cat > "$HOME/bin/claude-frugal" << 'WRAPPER'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -132,55 +131,11 @@ echo ""
 exec fcc "$@"
 WRAPPER
 
-# Create frugal-opencode
-cat > "$HOME/bin/frugal-opencode" << 'WRAPPER'
-#!/usr/bin/env bash
-set -euo pipefail
-
-echo "🚀 Frugal OpenCode - OpenCode on Free Models"
-echo ""
-
-# ── Dependency check ──────────────────────────────────────────────
-missing=()
-for cmd in python3 node free-coding-models opencode; do
-  if ! command -v "$cmd" &>/dev/null; then
-    missing+=("$cmd")
-  fi
-done
-
-if [[ ${#missing[@]} -gt 0 ]]; then
-  echo "❌ Missing dependencies:"
-  printf '  • %s\n' "${missing[@]}"
-  echo ""
-  echo "💡 Install missing deps:"
-  echo "   npm install -g free-coding-models"
-  echo "   npm install -g @anthropic-ai/opencode"
-  echo ""
-  exit 1
-fi
-
-# ── Cache check ───────────────────────────────────────────────────
-CACHE_DIR="$HOME/.frugality/cache"
-if [[ ! -d "$CACHE_DIR" ]] || [[ $(find "$CACHE_DIR" -mmin +60 2>/dev/null) ]]; then
-  echo "🔍 Discovering models..."
-  python3 "$(dirname "$(realpath "$0")")/../frugality.py" || {
-    echo "⚠️  Using cached model data..."
-  }
-fi
-
-# ── Launch! ───────────────────────────────────────────────────────
-echo ""
-echo "🎯 Starting OpenCode..."
-echo ""
-
-exec opencode "$@"
-WRAPPER
-
-# Make wrappers executable
-chmod +x "$HOME/bin/claude-frugal" "$HOME/bin/frugal-opencode"
+# Make wrapper executable
+chmod +x "$HOME/bin/claude-frugal"
 
 echo ""
-echo "✅ Wrappers created in $HOME/bin/"
+echo "✅ claude-frugal created in $HOME/bin/"
 
 # ── Initial discovery ──────────────────────────────────────────────
 echo ""
@@ -195,7 +150,6 @@ echo "🎉 Installation complete!"
 echo ""
 echo "Usage:"
 echo "  claude-frugal        # Start coding with free models"
-echo "  frugal-opencode      # Start OpenCode with free models"
 echo "  claude-frugal --help # Show all options"
 echo ""
 echo "💡 First time? Run 'free-coding-models' to setup API keys!"

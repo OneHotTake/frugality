@@ -2,19 +2,24 @@
 
 > Claude Code. Free models. Zero compromise.
 
-**✨ Beautiful, simple, and multi-friendly.**
+**✨ Beautiful, simple, and provider-friendly.**
 
 ---
 
-## 🚀 Fast Start
+## 🚀 Quick Start
 
-One command to get started:
+Clone and install in one command:
 
 ```bash
-npx frugality
+git clone https://github.com/OneHotTake/frugality.git
+cd frugality
+./scripts/install.sh
 ```
 
-That's it! It discovers free models and starts Claude Code. You'll be coding in ~30 seconds.
+Then:
+```bash
+claude-frugal  # Start coding with free models
+```
 
 ---
 
@@ -30,11 +35,11 @@ claude-frugal
 🤖 Claude Code
 ```
 
-**Smart routing**: Automatically picks the best free model for each task:
-- Complex tasks → Fast S+ models
+**Smart selection**: Automatically picks the best free model for each task:
+- Complex tasks → Highest scoring S+ models
 - Coding → Powerful S models
 - Quick checks → Lightweight A models
-- All providers → NVIDIA NIM, OpenRouter, Groq, 16+ more
+- All providers → Works with any provider in free-coding-models
 
 ---
 
@@ -57,24 +62,24 @@ uv tool install git+https://github.com/Alishahryar1/free-claude-code.git
 ### 2. Setup API Keys
 
 ```bash
-# Interactive setup
+# Configure providers you want to use
 free-coding-models
 ```
 
-Walk through the setup for providers you want to use (NVIDIA, OpenRouter, Groq, etc.).
+This will walk you through setting up API keys for providers like OpenRouter, Groq, etc.
 
 ### 3. Install Frugality
 
 ```bash
-git clone https://github.com/OneHotTake/frugality.git
-cd frugality
 ./scripts/install.sh
 ```
+
+The installer will create `claude-frugal` command in your `~/bin`.
 
 ### 4. Verify Installation
 
 ```bash
-claude-frugal --check-keys  # Check API keys
+claude-frugal --check-keys  # Check your API keys
 claude-frugal --help        # See all options
 ```
 
@@ -86,7 +91,6 @@ claude-frugal --help        # See all options
 
 ```bash
 claude-frugal              # Start coding with free models
-frugal-opencode            # Start OpenCode with free models
 ```
 
 ### Advanced Options
@@ -103,12 +107,12 @@ claude-frugal --verbose    # Debug info
 🚀 Frugality - Claude Code on Free Models
 
 🔍 Discovering models...
-✅ Providers available: nvidia, openrouter
+✅ Providers available: openrouter, groq
 
 📋 Active Models:
-  MODEL_OPUS     → DeepSeek V3        ⭐
-  MODEL_SONNET   → MiniMax M2.5       🌟
-  MODEL_HAIKU    → Mistral Large      💪
+  MODEL_OPUS     → deepseek-v3           ⭐
+  MODEL_SONNET   → qwen-3.5             🌟
+  MODEL_HAIKU    → mistral-large        💪
 
 🎯 Starting Claude Code...
 ```
@@ -135,13 +139,12 @@ fcc --version
 
 ### Common Issues
 
-**❌ No models found**
+**❌ No API keys configured**
 ```bash
-# Setup API keys
+# Setup providers
 free-coding-models
 
-# Check output
-free-coding-models --json
+# Follow the prompts to add API keys
 ```
 
 **❌ Missing dependencies**
@@ -151,12 +154,12 @@ free-coding-models --json
 # Install Claude Code
 ```
 
-**❌ Configuration errors**
+**❌ Config errors**
 ```bash
 # Regenerate config
 claude-frugal --refresh
 
-# Check config file
+# Check generated config
 cat ~/.config/free-claude-code/.env
 ```
 
@@ -164,27 +167,29 @@ cat ~/.config/free-claude-code/.env
 
 ## 🌟 Features
 
-### ✅ Multi-Provider Support
-- NVIDIA NIM (local & cloud)
+### ✅ Provider Compatible
+Works with any provider in free-coding-models:
 - OpenRouter
 - Groq
 - Cerebras
-- 16+ other providers
+- NVIDIA NIM
+- And 50+ others
 
-### ✅ Smart Routing
-- Tier-based model selection
-- Automatic provider mixing
-- Context-aware routing
+### ✅ Intelligent Selection
+- Picks highest scoring models
+- Prioritizes S+ tier for complex tasks
+- Uses S tier for core coding
+- A tier for lightweight tasks
 
 ### ✅ Beautiful UX
 - Clear status messages
 - Progress indicators
 - Helpful error messages
 
-### ✅ Zero Configuration
+### ✅ Simple Setup
 - Automatic model discovery
 - Smart defaults
-- One-command setup
+- One-command installation
 
 ---
 
@@ -206,13 +211,17 @@ uv tool install git+https://github.com/Alishahryar1/free-claude-code.git
 
 ## 📊 Supported Providers
 
-| Provider | Models | Cost |
-|----------|--------|------|
-| NVIDIA NIM | Llama, Mistral, Kimi | Free |
-| OpenRouter | DeepSeek, Qwen, Groq | Free tier |
-| Groq | Mixtral, Llama | Free |
-| Cerebras | Mixtral, Granite | Free |
-| 16+ more | Various | Free tiers |
+Frugality works with any provider supported by `free-coding-models`, including:
+- OpenRouter (DeepSeek, Qwen, etc.)
+- Groq (Mixtral, Llama)
+- Cerebras (Mixtral, Granite)
+- NVIDIA NIM
+- 50+ other providers
+
+Check the full list with:
+```bash
+free-coding-models --providers
+```
 
 ---
 
