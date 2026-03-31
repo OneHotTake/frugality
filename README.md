@@ -43,6 +43,48 @@ claude-frugal
 
 ---
 
+## 🔧 Running with Local Models
+
+Frugality works great with local models! Here's how to set it up:
+
+### Local Ollama Models
+
+```bash
+# Make sure Ollama is running
+ollama serve
+
+# Ollama models will automatically appear in free-coding-models
+# They'll be listed as "ollama/llama3", "ollama/mistral", etc.
+```
+
+### Local LiteLLM/Proxy Servers
+
+```bash
+# Point free-coding-models to your local server
+# Create ~/.free-coding-models.json:
+{
+  "local-server": {
+    "baseUrl": "http://localhost:8000",
+    "models": ["my-model"]
+  }
+}
+
+# Run free-coding-models to configure
+free-coding-models
+```
+
+### Self-Hosted Endpoints
+
+Any OpenAI-compatible endpoint works:
+- Local LLM servers
+- Kubernetes clusters
+- Cloud deployments
+- Private APIs
+
+Just add the endpoint to `free-coding-models` and frugality will automatically detect and use your models.
+
+---
+
 ## 📦 Installation
 
 ### 1. Install Dependencies
@@ -139,12 +181,20 @@ fcc --version
 
 ### Common Issues
 
-**❌ No API keys configured**
+**❌ No models found**
 ```bash
-# Setup providers
-free-coding-models
+# Check if free-coding-models sees your models
+free-coding-models --json | head -10
 
-# Follow the prompts to add API keys
+# For local models, ensure server is running:
+ollama serve  # or your local server
+```
+
+**❌ Models not working**
+```bash
+# Some models don't support tool calls
+# Frugality automatically filters these out
+# Try: claude-frugal --refresh to get compatible models
 ```
 
 **❌ Missing dependencies**
@@ -167,19 +217,26 @@ cat ~/.config/free-claude-code/.env
 
 ## 🌟 Features
 
-### ✅ Provider Compatible
-Works with any provider in free-coding-models:
-- OpenRouter
-- Groq
-- Cerebras
-- NVIDIA NIM
-- And 50+ others
+### ✅ Works with Any Model
+Frugality supports models from any source - cloud APIs, local servers, or self-hosted endpoints:
+
+- **Cloud APIs**: OpenRouter, Groq, Cerebras, NVIDIA NIM
+- **Local LLMs**: Ollama, LiteLLM, local OpenAI-compatible servers
+- **Self-hosted**: Your own model endpoints
+- **50+ providers**: Everything supported by free-coding-models
+
+### ✅ Smart Model Filtering
+We automatically discover and filter models to ensure they work well:
+
+- **Tool-call compatibility**: Only models that support function calling are selected
+- **Quality filtering**: Higher tier models (S+, S, A) are prioritized for complex tasks
+- **Provider mixing**: Uses the best available model from each configured provider
+- **Local & cloud**: Seamlessly works with both local and remote models
 
 ### ✅ Intelligent Selection
-- Picks highest scoring models
-- Prioritizes S+ tier for complex tasks
-- Uses S tier for core coding
-- A tier for lightweight tasks
+- **Tier-based routing**: S+ for complex tasks, S for coding, A for quick checks
+- **Automatic fallback**: If your preferred model is unavailable, we use the next best
+- **Clean display**: Shows you exactly which model is handling each task type
 
 ### ✅ Beautiful UX
 - Clear status messages
@@ -209,19 +266,27 @@ uv tool install git+https://github.com/Alishahryar1/free-claude-code.git
 
 ---
 
-## 📊 Supported Providers
+## 📊 Compatible Model Sources
 
-Frugality works with any provider supported by `free-coding-models`, including:
+Frugality works with any model source supported by `free-coding-models`:
+
+**Cloud Providers:**
 - OpenRouter (DeepSeek, Qwen, etc.)
 - Groq (Mixtral, Llama)
 - Cerebras (Mixtral, Granite)
 - NVIDIA NIM
-- 50+ other providers
 
-Check the full list with:
+**Local & Self-Hosted:**
+- Ollama servers
+- LiteLLM proxies
+- Custom OpenAI-compatible endpoints
+- Kubernetes deployments
+
+**All providers are supported** - cloud, local, or hybrid setups. Run:
 ```bash
 free-coding-models --providers
 ```
+to see all available options.
 
 ---
 
