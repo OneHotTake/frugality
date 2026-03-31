@@ -48,16 +48,14 @@ claude-frugal
 Frugality depends on these tools:
 
 ### Required
-- **Python 3.7+** - Core engine
-- **Node.js 18+** - For free-coding-models
+- **Python 3.7+** - Core engine for model discovery
+- **Node.js 18+** - Required for free-coding-models
 - **uv** - Package manager for free-claude-code
 - **Claude Code** - The main CLI
+- **free-coding-models** - Discovers and manages all AI models
+- **free-claude-code** - Proxy backend that routes Claude Code to models
 
-### Optional (for model access)
-- **free-coding-models** - Discovers and manages AI models
-- **free-claude-code** - Proxy backend (required for Claude Code)
-
-[→ See free-coding-models docs](https://github.com/xxradar/free-coding-models) for configuring local models like Ollama, LiteLLM, or custom endpoints.
+[→ Configure models and API keys](https://github.com/xxradar/free-coding-models) (supports Ollama, LiteLLM, cloud providers, and custom endpoints).
 
 ---
 
