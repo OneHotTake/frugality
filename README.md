@@ -2,6 +2,10 @@
 
 > Claude Code. Free models. Zero compromise.
 
+## v2.0.0 Migration: CCR has been retired.
+> Install the new backend: `uv tool install git+https://github.com/Alishahryar1/free-claude-code.git`
+> Then run `fcc-init` to scaffold the config, and `claude-frugal` as normal.
+
 ## Fast Start
 
 Already have Claude Code? One command:
@@ -19,23 +23,28 @@ That's it. It discovers free models, picks the best ones, and launches Claude Co
 ```
 claude-frugal
     |
-frugality.py  ->  free-coding-models --json  ->  certify & tier  ->  write env file
+frugality.py  ->  free-coding-models --json  ->  tier mapping  ->  write cc-nim config
     |
-claudish --model <best-free-model> --interactive  ->  Claude Code
+    fcc (proxy)  ←── Anthropic-format requests
+         ├── opus slot  → NIM kimi-k2.5
+         ├── sonnet slot → NIM glm4.7
+         └── haiku slot  → OpenRouter step-3.5-flash
+         |
+         ▼
+    Claude Code
 ```
 
-Every launch discovers the best available free models and configures [Claudish](https://github.com/MadAppGang/claudish) to proxy them. Just type `claude-frugal` instead of `claude`.
+Every launch discovers the best available free models and configures [free-claude-code](https://github.com/Alishahryar1/free-claude-code) to proxy them. Just type `claude-frugal` instead of `claude`.
 
 ## Routing tiers
 
 | Tier | Models | Used for |
 |------|--------|----------|
-| **default** | S/S+ (60-70% SWE) | General coding |
-| **background** | A+/A (40-60%) | File reads, searches, busywork |
-| **think** | Reasoning (R1, etc.) | Plan mode, hard bugs |
-| **longContext** | >32K context | Big files, log analysis |
+| **opus** | S/S+ (60-70% SWE) | Complex tasks, planning |
+| **sonnet** | S/A+ (40-70%) | Core coding work |
+| **haiku** | A/A- (20-40%) | Quota checks, topic detection |
 
-Claude Code picks the right slot per task. You never touch the config.
+free-claude-code automatically routes Claude Code's requests to the appropriate model based on complexity.
 
 ---
 
@@ -47,6 +56,7 @@ Claude Code picks the right slot per task. You never touch the config.
 |-----------|-----|---------|
 | Python 3.7+ | Core engine | [python.org](https://www.python.org/downloads/) |
 | Node.js 18+ | Model discovery tools | [nodejs.org](https://nodejs.org/) |
+| uv | Package manager for free-claude-code | [astral.sh/uv](https://astral.sh/uv) |
 | [Claude Code](https://claude.ai/code) | What you're making cheaper | Official installer |
 
 ### Step 1: Model discovery (required)
@@ -56,15 +66,16 @@ npm install -g free-coding-models
 free-coding-models   # interactive -- walks you through API key setup
 ```
 
-This discovers what free models are available from 16+ providers (Groq, Cerebras, SambaNova, NVIDIA, OpenRouter, etc.). You'll set up API keys once.
+This discovers what free models are available from 16+ providers (NVIDIA NIM, OpenRouter, Groq, etc.). You'll set up API keys once.
 
-### Step 2: Claudish proxy (required)
+### Step 2: free-claude-code proxy (required)
 
 ```bash
-npm install -g claudish
+uv tool install git+https://github.com/Alishahryar1/free-claude-code.git
+fcc-init  # creates initial config
 ```
 
-Claudish is the proxy that sits between Claude Code and the free models. It handles protocol compliance so Claude Code doesn't know it's not talking to Anthropic directly.
+free-claude-code is the proxy that sits between Claude Code and the free models. It handles protocol compliance and intelligent routing.
 
 ### Step 3: Frugality
 
@@ -74,7 +85,7 @@ cd frugality
 ./scripts/install.sh
 ```
 
-The installer drops `claude-frugal` into `~/bin/`. Make sure that's in your `$PATH`.
+The installer drops `claude-frugal` and `frugal-opencode` into `~/bin/`. Make sure that's in your `$PATH`.
 
 ### Verify
 
@@ -88,23 +99,30 @@ claude-frugal         # should discover models and launch
 
 ```bash
 claude-frugal         # discover models + launch Claude Code
-python3 frugality.py  # discover models and write env file only (no launch)
+frugal-opencode       # launch OpenCode with free models (no proxy needed)
+python3 frugality.py  # discover models and write cc-nim config only (no launch)
 ```
 
 ## Troubleshooting
 
 ```bash
-# Nothing working?
-free-coding-models --json          # verify model discovery works
-cat ~/.free-coding-models.json     # verify keys are there
-claudish --version                 # verify Claudish is installed
-cat ~/.frugality/current_env.sh    # check generated env file
+# Check cc-nim is installed
+fcc --version
 
-# Force fresh model discovery (skip 24h cache)
-rm ~/.frugality/cache/last-known-good.json
+# Check active model config
+cat ~/.config/free-claude-code/.env
 
-# Force fresh certification
-python3 frugality.py --refresh
+# Re-run model discovery manually
+python3 frugality.py
+
+# Check cc-nim logs (see free-claude-code docs for flags)
+fcc --help
+
+# Check model discovery
+free-coding-models --json
+
+# Force fresh model discovery
+rm ~/.frugality/cache/last-known-good.json  # if cached
 ```
 
 ## Roadmap
@@ -112,7 +130,7 @@ python3 frugality.py --refresh
 - `--dry-run` -- preview config without writing
 - `--tier` -- override model tier selection
 - `frug doctor` -- one-command diagnostics
-- Watchdog mode -- auto-refresh when a model's latency tanks
+- Provider auto-detection for local NIM deployments
 
 ## License
 

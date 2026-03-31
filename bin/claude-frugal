@@ -1,53 +1,42 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ============================================================
-# claude-frugal — Launch Claude Code via Claudish proxy
-# Discovers free-tier models, writes env config, invokes claudish.
-# ============================================================
-
-# --- Dependency check (fail fast) ---
-for cmd in python3 node claudish free-coding-models; do
-    if ! command -v "$cmd" &> /dev/null; then
-        echo "Error: '$cmd' is required but not installed."
-        case "$cmd" in
-            python3)            echo "Install: https://www.python.org/downloads/" ;;
-            node)               echo "Install: https://nodejs.org/" ;;
-            claudish)           echo "Install: npm install -g claudish" ;;
-            free-coding-models) echo "Install: npm install -g free-coding-models" ;;
-        esac
-        exit 1
-    fi
+# ── Dependency checks ──────────────────────────────────────────────
+MISSING=()
+for cmd in python3 node uv claude; do
+  command -v "$cmd" &>/dev/null || MISSING+=("$cmd")
 done
 
-FRUGALITY_PY="/home/onehottake/Projects/frugality/frugality.py"
-ENV_FILE="$HOME/.frugality/current_env.sh"
-
-# --- Run model discovery ---
-echo "Running Frugality model discovery..."
-python3 "$FRUGALITY_PY" "$@"
-FRUGALITY_EXIT=$?
-
-if [ $FRUGALITY_EXIT -ne 0 ]; then
-    echo "Error: Frugality configuration failed (exit $FRUGALITY_EXIT)."
-    exit $FRUGALITY_EXIT
+# fcc (free-claude-code) check — installed via uv tool
+if ! uv tool list 2>/dev/null | grep -q "free-claude-code"; then
+  MISSING+=("free-claude-code (run: uv tool install git+https://github.com/Alishahryar1/free-claude-code.git)")
 fi
 
-# --- Source the generated env file ---
-if [ ! -f "$ENV_FILE" ]; then
-    echo "Error: Env file not found at $ENV_FILE"
-    echo "Frugality may have failed to write it. Check logs above."
-    exit 1
+if [[ ${#MISSING[@]} -gt 0 ]]; then
+  echo "frugal-claude: missing dependencies:" >&2
+  printf '  - %s\n' "${MISSING[@]}" >&2
+  exit 1
 fi
 
-# shellcheck source=/dev/null
-source "$ENV_FILE"
+# ── Model discovery ────────────────────────────────────────────────
+echo "frugal-claude: discovering models..."
+python3 "$(dirname "$(realpath "$0")")/../frugality.py" || {
+  echo "frugal-claude: model discovery failed. Aborting." >&2
+  exit 1
+}
 
-if [ -z "${FRUG_CLAUDISH_INVOCATION:-}" ]; then
-    echo "Error: FRUG_CLAUDISH_INVOCATION not set in $ENV_FILE"
-    exit 1
+# ── Verify cc-nim config was written ──────────────────────────────
+CC_NIM_ENV="$HOME/.config/free-claude-code/.env"
+if [[ ! -f "$CC_NIM_ENV" ]]; then
+  echo "frugal-claude: $CC_NIM_ENV not found after discovery. Aborting." >&2
+  exit 1
 fi
 
-# --- Launch claudish ---
-echo "Launching Claudish..."
-eval "$FRUG_CLAUDISH_INVOCATION --interactive" "$@"
+# ── Print active model config ──────────────────────────────────────
+echo "frugal-claude: active routing:"
+grep -E '^MODEL' "$CC_NIM_ENV" | sed 's/^/  /'
+
+# ── Launch cc-nim proxy + Claude Code ─────────────────────────────
+# fcc-server starts the proxy; ANTHROPIC_BASE_URL points Claude Code at it.
+# fcc handles its own port management internally.
+exec fcc "$@"

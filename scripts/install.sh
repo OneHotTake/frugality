@@ -33,6 +33,14 @@ if ! command -v npm &> /dev/null; then
 fi
 echo "OK  npm: $(npm --version)"
 
+# Check uv
+if ! command -v uv &> /dev/null; then
+    echo "Error: uv is required but not installed."
+    echo "Install: curl -LsSf https://astral.sh/uv/install.sh | sh"
+    exit 1
+fi
+echo "OK  uv: $(uv --version)"
+
 echo ""
 echo "=========================================="
 echo "  Installing Dependencies"
@@ -48,38 +56,15 @@ else
     echo "OK  free-coding-models already installed"
 fi
 
-# Install Claudish if not already installed
-if ! command -v claudish &> /dev/null; then
-    echo "Installing Claudish..."
-    npm install -g claudish
-    echo "OK  Claudish installed"
-else
-    echo "OK  Claudish already installed"
-fi
+# Install free-claude-code proxy
+echo "Installing free-claude-code proxy..."
+uv tool install git+https://github.com/Alishahryar1/free-claude-code.git
 
-# Verify Claudish version
-echo "Claudish version: $(claudish --version 2>/dev/null || echo 'unknown')"
+echo "Initializing free-claude-code config..."
+fcc-init  # creates ~/.config/free-claude-code/.env from built-in template
 
-# Auto-update provider URLs from free-coding-models
-echo ""
-echo "=========================================="
-echo " Syncing Provider URLs"
-echo "=========================================="
-echo ""
-echo "Extracting provider endpoints from free-coding-models..."
-node "$SCRIPT_DIR/extract-provider-urls.js" > /tmp/provider-urls.json
-if [ $? -eq 0 ]; then
-    echo "OK  Extracted provider URLs"
-    echo "Updating frugality.py..."
-    python3 "$SCRIPT_DIR/update-provider-urls.py" /tmp/provider-urls.json
-    if [ $? -eq 0 ]; then
-        echo "OK  Updated provider URLs in frugality.py"
-    else
-        echo "Warning: Failed to update provider URLs"
-    fi
-else
-    echo "Warning: Failed to extract provider URLs"
-fi
+echo "Verifying installation..."
+fcc --version || { echo "free-claude-code install failed"; exit 1; }
 
 # Verify installations
 echo ""
@@ -89,7 +74,7 @@ echo "=========================================="
 echo ""
 
 echo "free-coding-models: $(which free-coding-models)"
-echo "claudish: $(which claudish)"
+echo "fcc: $(which fcc)"
 
 # Test free-coding-models
 echo ""
@@ -132,53 +117,83 @@ WRAPPER_HEADER
 
 cat >> "$HOME/bin/claude-frugal" << 'WRAPPER_BODY'
 
-# --- Dependency check (fail fast) ---
-for cmd in python3 node claudish free-coding-models; do
-    if ! command -v "$cmd" &> /dev/null; then
-        echo "Error: '$cmd' is required but not installed."
-        case "$cmd" in
-            python3)            echo "Install: https://www.python.org/downloads/" ;;
-            node)               echo "Install: https://nodejs.org/" ;;
-            claudish)           echo "Install: npm install -g claudish" ;;
-            free-coding-models) echo "Install: npm install -g free-coding-models" ;;
-        esac
-        exit 1
-    fi
+# ── Dependency checks ──────────────────────────────────────────────
+MISSING=()
+for cmd in python3 node uv claude; do
+  command -v "$cmd" &>/dev/null || MISSING+=("$cmd")
 done
 
-ENV_FILE="$HOME/.frugality/current_env.sh"
-
-# --- Run model discovery ---
-echo "Running Frugality model discovery..."
-python3 "$FRUGALITY_PY" "$@"
-FRUGALITY_EXIT=$?
-
-if [ $FRUGALITY_EXIT -ne 0 ]; then
-    echo "Error: Frugality configuration failed (exit $FRUGALITY_EXIT)."
-    exit $FRUGALITY_EXIT
+# fcc (free-claude-code) check — installed via uv tool
+if ! uv tool list 2>/dev/null | grep -q "free-claude-code"; then
+  MISSING+=("free-claude-code (run: uv tool install git+https://github.com/Alishahryar1/free-claude-code.git)")
 fi
 
-# --- Source the generated env file ---
-if [ ! -f "$ENV_FILE" ]; then
-    echo "Error: Env file not found at $ENV_FILE"
-    exit 1
+if [[ ${#MISSING[@]} -gt 0 ]]; then
+  echo "frugal-claude: missing dependencies:" >&2
+  printf '  - %s\n' "${MISSING[@]}" >&2
+  exit 1
 fi
 
-# shellcheck source=/dev/null
-source "$ENV_FILE"
+# ── Model discovery ────────────────────────────────────────────────
+echo "frugal-claude: discovering models..."
+python3 "$FRUGALITY_PY" || {
+  echo "frugal-claude: model discovery failed. Aborting." >&2
+  exit 1
+}
 
-if [ -z "${FRUG_CLAUDISH_INVOCATION:-}" ]; then
-    echo "Error: FRUG_CLAUDISH_INVOCATION not set in $ENV_FILE"
-    exit 1
+# ── Verify cc-nim config was written ──────────────────────────────
+CC_NIM_ENV="$HOME/.config/free-claude-code/.env"
+if [[ ! -f "$CC_NIM_ENV" ]]; then
+  echo "frugal-claude: $CC_NIM_ENV not found after discovery. Aborting." >&2
+  exit 1
 fi
 
-# --- Launch claudish ---
-echo "Launching Claudish..."
-eval "$FRUG_CLAUDISH_INVOCATION --interactive" "$@"
+# ── Print active model config ──────────────────────────────────────
+echo "frugal-claude: active routing:"
+grep -E '^MODEL' "$CC_NIM_ENV" | sed 's/^/  /'
+
+# ── Launch cc-nim proxy + Claude Code ─────────────────────────────
+exec fcc "$@"
+WRAPPER_BODY
+
+# Generate frugal-opencode wrapper
+cat > "$HOME/bin/frugal-opencode" << WRAPPER_HEADER
+#!/usr/bin/env bash
+set -euo pipefail
+
+FRUGALITY_PY="$FRUGALITY_PY"
+WRAPPER_HEADER
+
+cat >> "$HOME/bin/frugal-opencode" << 'WRAPPER_BODY'
+
+# ── Dependency checks ──────────────────────────────────────────────
+MISSING=()
+for cmd in python3 node free-coding-models opencode; do
+  command -v "$cmd" &>/dev/null || MISSING+=("$cmd")
+done
+
+if [[ ${#MISSING[@]} -gt 0 ]]; then
+  echo "frugal-opencode: missing dependencies:" >&2
+  printf '  - %s\n' "${MISSING[@]}" >&2
+  exit 1
+fi
+
+# ── Cache check ───────────────────────────────────────────────────
+CACHE_DIR="$HOME/.frugality/cache"
+if [[ ! -d "$CACHE_DIR" ]] || [[ $(find "$CACHE_DIR" -mmin +60 2>/dev/null) ]]; then
+  echo "frugal-opencode: running model discovery..."
+  python3 "$FRUGALITY_PY" || {
+    echo "frugal-opencode: model discovery failed. Continuing with cached data..." >&2
+  }
+fi
+
+# ── Launch OpenCode natively ─────────────────────────────────────
+exec opencode "$@"
 WRAPPER_BODY
 
 chmod +x "$HOME/bin/claude-frugal"
-echo "OK  Created ~/bin/claude-frugal"
+chmod +x "$HOME/bin/frugal-opencode"
+echo "OK  Created ~/bin/claude-frugal and ~/bin/frugal-opencode"
 
 echo ""
 echo "=========================================="
@@ -192,4 +207,5 @@ echo ""
 echo "Installation complete!"
 echo ""
 echo "Usage:"
-echo "  claude-frugal        # Launch Claude Code via Claudish with free models"
+echo "  claude-frugal        # Launch Claude Code via cc-nim with free models"
+echo "  frugal-opencode      # Launch OpenCode with free models"
