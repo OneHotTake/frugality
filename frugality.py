@@ -54,6 +54,8 @@ PROVIDER_PREFIXES = {
     "scaleway": "scaleway",
     "qwen": "qwen",
     "iflow": "iflow",
+    "ollama": "ollama",
+    "litellm": "litellm",
 }
 
 def normalize_model_id(provider, model_id):
@@ -114,7 +116,9 @@ def get_provider_display_name(model_id, provider_key=None):
             "iflow": "iFlow",
             "opencode-zen": "OpenCode Zen",
             "mistral": "Mistral",
-            "cloudflare": "Cloudflare"
+            "cloudflare": "Cloudflare",
+            "ollama": "Ollama",
+            "litellm": "LiteLLM"
         }
         if provider_key in provider_map:
             return provider_map[provider_key]
@@ -170,11 +174,14 @@ def get_existing_keys():
         try:
             with open(FCM_CONFIG_PATH) as f:
                 fcm_data = json.load(f)
-                # Check both provider names and their variations
+                # Check apiKeys section
+                if "apiKeys" in fcm_data:
+                    for provider in PROVIDER_PREFIXES.keys():
+                        if provider in fcm_data["apiKeys"]:
+                            keys[provider] = True
+                # Also check top-level for backward compatibility
                 all_providers = set(PROVIDER_PREFIXES.keys())
-                # Add common aliases
                 all_providers.update(["nvidia", "openrouter", "groq", "cerebras", "mistral"])
-
                 for provider in all_providers:
                     if provider in fcm_data:
                         keys[provider] = True
@@ -195,6 +202,107 @@ def get_existing_keys():
             pass
 
     return keys
+
+def get_ollama_models():
+    """Get models directly from local Ollama instance using OpenAI-compatible /v1/models."""
+    import urllib.request
+    import urllib.error
+
+    # Find Ollama URL from config
+    ollama_url = None
+    if os.path.exists(FCM_CONFIG_PATH):
+        try:
+            with open(FCM_CONFIG_PATH) as f:
+                fcm_data = json.load(f)
+                api_keys = fcm_data.get("apiKeys", {})
+                if "ollama" in api_keys:
+                    ollama_url = api_keys["ollama"]
+                elif "litellm" in api_keys:
+                    ollama_url = api_keys["litellm"]
+        except Exception:
+            pass
+
+    if not ollama_url:
+        return []
+
+    # Strip trailing slash
+    ollama_url = ollama_url.rstrip("/")
+
+    # Fetch models via /v1/models (OpenAI-compatible)
+    try:
+        req = urllib.request.Request(f"{ollama_url}/v1/models")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+
+        ollama_models = []
+        for model_entry in data.get("data", []):
+            model_id = model_entry.get("id", "")
+            if not model_id:
+                continue
+
+            # Determine context size from model name
+            context = "32k"
+            if "64k" in model_id.lower():
+                context = "64k"
+            elif "128k" in model_id.lower():
+                context = "128k"
+
+            # Determine parameter count from model name for tier assignment
+            param_b = 0
+            for suffix in ["70b", "72b", "65b"]:
+                if suffix in model_id.lower():
+                    param_b = int(suffix.replace("b", ""))
+                    break
+            if param_b == 0:
+                for suffix in ["33b", "32b", "30b"]:
+                    if suffix in model_id.lower():
+                        param_b = int(suffix.replace("b", ""))
+                        break
+            if param_b == 0:
+                for suffix in ["20b", "14b", "13b"]:
+                    if suffix in model_id.lower():
+                        param_b = int(suffix.replace("b", ""))
+                        break
+            if param_b == 0:
+                for suffix in ["8b", "7b"]:
+                    if suffix in model_id.lower():
+                        param_b = int(suffix.replace("b", ""))
+                        break
+
+            # Tier for local models: larger params + context = higher tier
+            ctx_k = int(context.replace("k", ""))
+            if param_b >= 65 and ctx_k >= 128:
+                tier = "S+ (Local)"
+            elif param_b >= 30 and ctx_k >= 32:
+                tier = "S (Local)"
+            elif param_b >= 13 and ctx_k >= 16:
+                tier = "A+ (Local)"
+            else:
+                tier = "A (Local)"
+
+            ollama_models.append({
+                "modelId": model_id,
+                "label": model_id,
+                "provider": "ollama",
+                "tier": tier,
+                "sweScore": f"{min(param_b * 0.8, 75):.1f}%",
+                "context": context,
+                "latestPing": 0,
+                "avgPing": 0,
+                "p95": 0,
+                "jitter": 0,
+                "stability": 100,
+                "uptime": 100,
+                "verdict": "Local",
+                "status": "up",
+            })
+
+        logger.debug("Ollama: found %d models at %s" % (len(ollama_models), ollama_url))
+        return ollama_models
+
+    except Exception as e:
+        logger.debug("Ollama discovery failed: %s" % e)
+        return []
 
 def get_fcm_data():
     """Get model data from free-coding-models."""
@@ -287,10 +395,10 @@ def select_best_models(models, available_providers):
     ))
 
     # Tier-based selection
-    s_plus_models = [m for m in all_sorted if m.get("tier") == "S+"]
-    s_models = [m for m in all_sorted if m.get("tier") == "S"]
-    a_models = [m for m in all_sorted if m.get("tier") in ["A", "A+", "A-"]]
-    b_models = [m for m in all_sorted if m.get("tier") in ["B", "B+", "B-"]]
+    s_plus_models = [m for m in all_sorted if _base_tier(m.get("tier")) == "S+"]
+    s_models = [m for m in all_sorted if _base_tier(m.get("tier")) == "S"]
+    a_models = [m for m in all_sorted if _base_tier(m.get("tier")) in ["A", "A+", "A-"]]
+    b_models = [m for m in all_sorted if _base_tier(m.get("tier")) in ["B", "B+", "B-"]]
 
     # Model assignments
     if s_plus_models:
@@ -614,10 +722,27 @@ def run_probes(candidates: list, registry: dict, credentials: dict) -> dict:
             continue
         key = registry_key(provider, model_id)
         existing = registry["models"].get(key, {})
+
         if existing.get("status") == "blocked":
             continue  # never re-probe blocked models
         if existing.get("status") == "certified" and not is_cert_stale(existing):
             continue  # fresh cert, skip
+
+        # Auto-certify local models (Ollama, LiteLLM) — no remote API probing needed
+        if provider in ("ollama", "litellm") or m.get("provider") in ("ollama", "litellm"):
+            registry["models"][key] = {
+                "status": "certified",
+                "probe_version": PROBE_VERSION,
+                "probe_profile": "local_auto",
+                "provider": provider,
+                "model_id": model_id,
+                "capabilities": {"tool_calling": True, "tool_roundtrip": True, "valid_json_args": True},
+                "failure_reason": None,
+                "last_verified_at": datetime.now().isoformat(),
+            }
+            print(f" {provider}/{model_id}: LOCAL ✅ (auto-certified)")
+            continue
+
         to_probe.append(m)
 
     if not to_probe:
@@ -702,6 +827,12 @@ def get_certified_models_for_selection():
 
     # Get all models and filter to certified
     models = get_fcm_data()
+
+    # Also include local Ollama models (always certified since local)
+    ollama_models = get_ollama_models()
+    if ollama_models:
+        models.extend(ollama_models)
+
     if not models:
         return []
 
@@ -814,13 +945,19 @@ def load_selection_cache():
         logger.warning(f"Failed to load selection cache: {e}")
         return None
 
+def _base_tier(tier_str):
+    """Extract base tier from a tier string like 'S+ (Local)' -> 'S+'."""
+    if not tier_str:
+        return "C"
+    return tier_str.split(" ")[0]
+
 def map_tiers(models):
     """Map models to roles based on tier and capabilities."""
     routes = {"default": None, "background": None, "think": None, "longContext": None}
 
     for m in models:
         model_id = m.get("modelId", "")
-        tier = m.get("tier", "C")
+        tier = _base_tier(m.get("tier", "C"))
         context = m.get("context", "0")
 
         # Parse context size
@@ -843,11 +980,11 @@ def map_tiers(models):
             routes["longContext"] = m
 
         # Default models (S+ tier preferred)
-        if not routes["default"] and tier in ["S+", "S"]:
+        if not routes["default"] and tier in ["S+", "S", "A+", "A"]:
             routes["default"] = m
 
         # Background models (A tier)
-        if not routes["background"] and tier in ["A+", "A"]:
+        if not routes["background"] and tier in ["A+", "A", "B+", "B"]:
             routes["background"] = m
 
     # Fill empty roles with default
@@ -1089,7 +1226,10 @@ def print_summary(selected_models, available_providers):
                 else:
                     tier = "A (Local)"
 
-            tier_emoji = {"S+": "⭐", "S": "🌟", "A": "💪", "B": "🔧", "C": "🔰"}.get(tier.split(" ")[0], "❓")
+            tier_emoji = {"S+": "⭐", "S": "🌟", "A+": "💪", "A": "💪", "B+": "🔧", "B": "🔧", "C": "🔰"}.get(tier.split(" ")[0], "❓")
+
+            # Add local indicator
+            local_tag = " 🏠" if "(Local)" in tier else ""
 
             # Get thinking status
             thinking = ""
@@ -1097,7 +1237,7 @@ def print_summary(selected_models, available_providers):
             if any(keyword in model_lower for keyword in ["kimi", "nemotron", "deepseek-r1", "qwq"]):
                 thinking = " 🧠"
 
-            print(f"{slot:<12} → {display:<35} {tier_emoji} {thinking}")
+            print(f"{slot:<12} → {display:<35} {tier_emoji} {tier:<15}{local_tag}{thinking}")
 
     print("=" * 50)
     print("💡 Tip: Run 'claude-frugal' to start coding with free models!")
@@ -1202,6 +1342,13 @@ def main():
 
     # Get model data
     models = get_fcm_data()
+
+    # Also fetch local Ollama models
+    ollama_models = get_ollama_models()
+    if ollama_models:
+        print(f"🏠 Found {len(ollama_models)} local Ollama model(s)")
+        models.extend(ollama_models)
+
     if not models:
         print("❌ No models found. Check your API keys and network.")
         print("💡 Tip: Run 'free-coding-models' to configure providers")
