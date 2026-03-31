@@ -139,9 +139,9 @@ claude-frugal --timeout 5  # 5-second timeout for prompt
 ✅ Providers available: openrouter, groq, nvidia
 
 📋 Active Models:
-  MODEL_OPUS     → openrouter/deepseek-v3     ⭐
-  MODEL_SONNET   → groq/qwen-3.5              🌟
-  MODEL_HAIKU    → nvidia/mistral-large       💪
+  MODEL_OPUS     → OpenRouter | deepseek-v3     ⭐
+  MODEL_SONNET   → Groq | qwen-3.5              🌟
+  MODEL_HAIKU    → NVIDIA NIM | mistral-large  💪
 
 🎯 Starting Claude Code...
 ```
@@ -161,10 +161,10 @@ claude-frugal --timeout 5  # 5-second timeout for prompt
 🚀 Current Model Selection
 ============================================================
 
- Default (S)             → groq/qwen-3.5 (S, 128k)
- Background (A)          → groq/qwen-3.5 (S, 128k)
- Thinking (R1)           → groq/qwen-3.5 (S, 128k)
- Long Context            → groq/qwen-3.5 (S, 128k)
+ Default (S)             → Groq | qwen-3.5 (S, 128k)
+ Background (A)          → Groq | qwen-3.5 (A, 128k)
+ Thinking (R1)           → Groq | qwen-3.5 (S, 128k)
+ Long Context            → Groq | qwen-3.5 (S, 128k)
 
  Options:
  [1] ✅ Accept & Launch (timeout in 3s)
@@ -176,10 +176,10 @@ claude-frugal --timeout 5  # 5-second timeout for prompt
 
 ```
 📋 Available models for 'Default (S)':
- [1] groq/qwen-3.5 (S, 128k) ← CURRENT
- [2] openrouter/qwen-3.5 (S, 128k)
- [3] nvidia/qwen-3.5 (S, 128k)
- [4] openrouter/deepseek-v3 (S+, 200k)
+ [1] Groq | qwen-3.5 (S, 128k) ← CURRENT
+ [2] OpenRouter | qwen-3.5 (S, 128k)
+ [3] NVIDIA NIM | qwen-3.5 (S, 128k)
+ [4] OpenRouter | deepseek-v3 (S+, 200k)
 
 Select model for Default: 2
 ✅ Updated Default assignment
@@ -264,7 +264,7 @@ cat ~/.config/free-claude-code/.env
 - **Model testing**: Probes each model with real tool calls to verify capability
 - **Quality-based routing**: Picks S+ models for complex tasks, S for coding, A for quick checks
 - **Multi-provider support**: Works with any provider in free-coding-models
-- **Provider display**: Shows provider and model (e.g., "openrouter/qwen-3.5")
+- **Location display**: Shows where model runs (e.g., "OpenRouter | qwen-3.5")
 - **Interactive selection**: Choose between providers when same model is available
 - **Selection caching**: Remembers your choices for faster launches
 

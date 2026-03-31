@@ -89,30 +89,71 @@ def get_model_display_name(model_id):
     # Split on / and take last part
     return model_id.split("/")[-1]
 
-def get_provider_display_name(model_id):
-    """Get simplified provider name from model_id."""
-    # Extract provider prefix
+def get_provider_display_name(model_id, provider_key=None):
+    """Get simplified provider name from model_id or provider_key."""
+    # If we have the provider_key, use it to map to friendly names
+    if provider_key:
+        # Map provider keys to friendly names based on free-coding-models metadata
+        provider_map = {
+            "nvidia": "NVIDIA NIM",
+            "groq": "Groq",
+            "cerebras": "Cerebras",
+            "sambanova": "SambaNova",
+            "openrouter": "OpenRouter",
+            "huggingface": "Hugging Face",
+            "replicate": "Replicate",
+            "deepinfra": "DeepInfra",
+            "fireworks": "Fireworks",
+            "together": "Together",
+            "hyperbolic": "Hyperbolic",
+            "siliconflow": "SiliconFlow",
+            "scaleway": "Scaleway",
+            "google": "Google AI",
+            "perplexity": "Perplexity",
+            "qwen": "Qwen",
+            "iflow": "iFlow",
+            "opencode-zen": "OpenCode Zen",
+            "mistral": "Mistral",
+            "cloudflare": "Cloudflare"
+        }
+        if provider_key in provider_map:
+            return provider_map[provider_key]
+
+    # Extract provider prefix from model_id
     for provider, prefix in PROVIDER_PREFIXES.items():
         if model_id.startswith(prefix + "/"):
-            # Return simplified name
-            return {
-                "open_router": "openrouter",
-                "nvidia_nim": "nvidia",
-                "cerebras": "cerebras",
-                "sambanova": "sambanova",
-                "deepinfra": "deepinfra",
-                "siliconflow": "siliconflow",
-                "scaleway": "scaleway",
-                "qwen": "qwen",
-                "iflow": "iflow"
-            }.get(prefix, provider)
+            # Map prefixes to friendly names
+            prefix_map = {
+                "open_router": "OpenRouter",
+                "nvidia_nim": "NVIDIA NIM",
+                "cerebras": "Cerebras",
+                "sambanova": "SambaNova",
+                "deepinfra": "DeepInfra",
+                "siliconflow": "SiliconFlow",
+                "scaleway": "Scaleway",
+                "qwen": "Qwen",
+                "iflow": "iFlow",
+                "groq": "Groq",
+                "mistral": "Mistral",
+                "fireworks": "Fireworks",
+                "together": "Together",
+                "huggingface": "Hugging Face",
+                "perplexity": "Perplexity",
+                "google": "Google AI"
+            }
+            return prefix_map.get(prefix, provider.title())
 
     # Fallback - extract from model_id
     parts = model_id.split("/")
     if len(parts) > 1:
-        return parts[0].replace("_", "")
+        name = parts[0].replace("_", "")
+        # Check for common local patterns
+        if name in ["ollama", "litellm"]:
+            return name.title()
+        # Capitalize properly
+        return name.title()
 
-    return "unknown"
+    return "Unknown"
 
 def classify_call_weight(message_count, has_tools, prompt_length):
     """Classify call weight for smart routing."""
@@ -609,7 +650,7 @@ def run_probes(candidates: list, registry: dict, credentials: dict) -> dict:
             result["label"] = m.get("label", model_id)
             results.append((m, result))
             # Get provider and model display names
-            provider_display = get_provider_display_name(f"{provider_name}/{model_id}")
+            provider_display = get_provider_display_name(f"{provider_name}/{model_id}", provider_name)
             model_display = get_model_display_name(f"{provider_name}/{model_id}")
 
             status_str = {
@@ -690,15 +731,31 @@ def format_model_display(model_data, full=False):
     tier = model_data.get("tier", "")
     context = model_data.get("context", "")
 
-    # Get simplified provider name
+    # Get simplified provider name using provider key if available
     full_model_id = normalize_model_id(provider, model_id)
-    provider_name = get_provider_display_name(full_model_id)
+    provider_name = get_provider_display_name(full_model_id, provider)
     model_name = get_model_display_name(full_model_id)
 
+    # Add special tier handling for local models
+    display_tier = tier
+    if provider in ["ollama", "litellm"] or "local" in provider_name.lower():
+        # For local models, create a creative tier based on context size
+        if context and int(context.replace("k", "")) >= 128:
+            display_tier = "S+ (Local)"
+        elif context and int(context.replace("k", "")) >= 64:
+            display_tier = "S (Local)"
+        elif context and int(context.replace("k", "")) >= 32:
+            display_tier = "A+ (Local)"
+        else:
+            display_tier = "A (Local)"
+    elif not tier or tier == "unknown":
+        # Handle models without tier info
+        display_tier = "Unknown"
+
     if full:
-        return f"{provider_name}/{model_name} ({tier}, {context})"
+        return f"{provider_name} | {model_name} ({display_tier}, {context})"
     else:
-        return f"{provider_name}/{model_name} ({tier})"
+        return f"{provider_name} | {model_name} ({display_tier})"
 
 def save_selection_cache(routes):
     """Save model selections to cache file."""
@@ -1012,15 +1069,27 @@ def print_summary(selected_models, available_providers):
             model_id = normalize_model_id(model["provider"], model["modelId"])
 
             # Get provider and model display names
-            provider_name = get_provider_display_name(model_id)
+            provider_name = get_provider_display_name(model_id, model["provider"])
             model_name = get_model_display_name(model_id)
 
-            # Format as provider/model
-            display = f"{provider_name}/{model_name}"
+            # Format as provider | model to show location
+            display = f"{provider_name} | {model_name}"
 
-            # Get tier
+            # Get tier with special handling for local models
             tier = model.get("tier", "unknown")
-            tier_emoji = {"S+": "⭐", "S": "🌟", "A": "💪", "B": "🔧", "C": "🔰"}.get(tier, "❓")
+            if model["provider"] in ["ollama", "litellm"] or "local" in provider_name.lower():
+                # For local models, create creative tier based on context
+                context = model.get("context", "32k")
+                if context and int(context.replace("k", "")) >= 128:
+                    tier = "S+ (Local)"
+                elif context and int(context.replace("k", "")) >= 64:
+                    tier = "S (Local)"
+                elif context and int(context.replace("k", "")) >= 32:
+                    tier = "A+ (Local)"
+                else:
+                    tier = "A (Local)"
+
+            tier_emoji = {"S+": "⭐", "S": "🌟", "A": "💪", "B": "🔧", "C": "🔰"}.get(tier.split(" ")[0], "❓")
 
             # Get thinking status
             thinking = ""
