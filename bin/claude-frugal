@@ -1,42 +1,79 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ── Dependency checks ──────────────────────────────────────────────
-MISSING=()
-for cmd in python3 node uv claude; do
-  command -v "$cmd" &>/dev/null || MISSING+=("$cmd")
-done
+# ── Welcome banner ───────────────────────────────────────────────
+echo "🚀 Frugality - Claude Code on Free Models"
+echo ""
 
-# fcc (free-claude-code) check — installed via uv tool
-if ! uv tool list 2>/dev/null | grep -q "free-claude-code"; then
-  MISSING+=("free-claude-code (run: uv tool install git+https://github.com/Alishahryar1/free-claude-code.git)")
+# ── Quick start check ────────────────────────────────────────────
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    echo "Usage: claude-frugal [options]"
+    echo ""
+    echo "Options:"
+    echo "  --help, -h     Show this help"
+    echo "  --check-keys   Check API keys"
+    echo "  --refresh      Force fresh model discovery"
+    echo ""
+    echo "Examples:"
+    echo "  claude-frugal          # Start coding with free models"
+    echo "  claude-frugal --refresh # Discover new models"
+    echo "  claude-frugal --check-keys # Verify API keys"
+    echo ""
+    exit 0
 fi
 
-if [[ ${#MISSING[@]} -gt 0 ]]; then
-  echo "frugal-claude: missing dependencies:" >&2
-  printf '  - %s\n' "${MISSING[@]}" >&2
+# ── Dependency check ──────────────────────────────────────────────
+missing=()
+for cmd in python3 node uv claude; do
+  if ! command -v "$cmd" &>/dev/null; then
+    missing+=("$cmd")
+  fi
+done
+
+# Check free-claude-code
+if ! uv tool list 2>/dev/null | grep -q "free-claude-code"; then
+  missing+=("free-claude-code (uv tool install git+https://github.com/Alishahryar1/free-claude-code.git)")
+fi
+
+if [[ ${#missing[@]} -gt 0 ]]; then
+  echo "❌ Missing dependencies:"
+  printf '  • %s\n' "${missing[@]}"
+  echo ""
+  echo "💡 Install missing deps:"
+  echo "   npm install -g free-coding-models"
+  echo "   curl -LsSf https://astral.sh/uv/install.sh | sh"
+  echo "   uv tool install git+https://github.com/Alishahryar1/free-claude-code.git"
+  echo ""
   exit 1
 fi
 
 # ── Model discovery ────────────────────────────────────────────────
-echo "frugal-claude: discovering models..."
-python3 "$(dirname "$(realpath "$0")")/../frugality.py" || {
-  echo "frugal-claude: model discovery failed. Aborting." >&2
-  exit 1
-}
+if [[ "${1:-}" != "--check-keys" ]]; then
+  echo "🔍 Discovering models..."
+  python3 "$(dirname "$(realpath "$0")")/../frugality.py" "$@" || {
+    echo "❌ Model discovery failed"
+    echo "💡 Try: free-coding-models (to setup API keys)"
+    exit 1
+  fi
+fi
 
-# ── Verify cc-nim config was written ──────────────────────────────
+# ── Verify config ──────────────────────────────────────────────────
 CC_NIM_ENV="$HOME/.config/free-claude-code/.env"
 if [[ ! -f "$CC_NIM_ENV" ]]; then
-  echo "frugal-claude: $CC_NIM_ENV not found after discovery. Aborting." >&2
+  echo "❌ Config not found. Run: claude-frugal --refresh"
   exit 1
 fi
 
-# ── Print active model config ──────────────────────────────────────
-echo "frugal-claude: active routing:"
-grep -E '^MODEL' "$CC_NIM_ENV" | sed 's/^/  /'
+# ── Show active models ─────────────────────────────────────────────
+echo ""
+echo "📋 Active Models:"
+grep -E '^MODEL' "$CC_NIM_ENV" | sed 's/^/  /' | sed 's/="/ → /' | sed 's/"$//'
 
-# ── Launch cc-nim proxy + Claude Code ─────────────────────────────
-# fcc-server starts the proxy; ANTHROPIC_BASE_URL points Claude Code at it.
-# fcc handles its own port management internally.
+# ── Launch! ───────────────────────────────────────────────────────
+echo ""
+echo "🎯 Starting Claude Code..."
+echo "   (Proxy: free-claude-code)"
+echo ""
+
+# Start the proxy with Claude Code
 exec fcc "$@"

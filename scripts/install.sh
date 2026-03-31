@@ -4,208 +4,198 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-echo "=========================================="
-echo "  Frugality Installation"
-echo "=========================================="
+# ── Welcome banner ───────────────────────────────────────────────
+echo "🚀 Welcome to Frugality!"
+echo "   Claude Code. Free models. Zero compromise."
 echo ""
 
-# Check dependencies
-echo "Checking dependencies..."
+# ── Dependency check ──────────────────────────────────────────────
+echo "📦 Checking dependencies..."
 
-# Check Python
-if ! command -v python3 &> /dev/null; then
-    echo "Error: Python 3 is required but not installed."
-    exit 1
-fi
-echo "OK  Python 3: $(python3 --version)"
+deps_ok=true
+for dep in python3 node npm uv; do
+  if ! command -v "$dep" &> /dev/null; then
+    echo "❌ $dep is required but not installed"
+    case "$dep" in
+      python3) echo "   Install: https://python.org/downloads/" ;;
+      node) echo "   Install: https://nodejs.org/" ;;
+      npm) echo "   Install: comes with Node.js" ;;
+      uv) echo "   Install: curl -LsSf https://astral.sh/uv/install.sh | sh" ;;
+    esac
+    deps_ok=false
+  else
+    echo "✅ $dep: $($dep --version 2>/dev/null || echo 'ok')"
+  fi
+done
 
-# Check Node.js
-if ! command -v node &> /dev/null; then
-    echo "Error: Node.js is required but not installed."
-    exit 1
+if [[ "$deps_ok" == "false" ]]; then
+  echo ""
+  echo "💡 Install missing dependencies first, then run this script again."
+  exit 1
 fi
-echo "OK  Node.js: $(node --version)"
-
-# Check npm
-if ! command -v npm &> /dev/null; then
-    echo "Error: npm is required but not installed."
-    exit 1
-fi
-echo "OK  npm: $(npm --version)"
-
-# Check uv
-if ! command -v uv &> /dev/null; then
-    echo "Error: uv is required but not installed."
-    echo "Install: curl -LsSf https://astral.sh/uv/install.sh | sh"
-    exit 1
-fi
-echo "OK  uv: $(uv --version)"
 
 echo ""
-echo "=========================================="
-echo "  Installing Dependencies"
-echo "=========================================="
-echo ""
 
-# Install free-coding-models if not already installed
+# ── Install dependencies ──────────────────────────────────────────
+echo "📥 Installing dependencies..."
+
+# Install free-coding-models
 if ! command -v free-coding-models &> /dev/null; then
-    echo "Installing free-coding-models..."
-    npm install -g free-coding-models
-    echo "OK  free-coding-models installed"
+  echo "• Installing free-coding-models..."
+  npm install -g free-coding-models
 else
-    echo "OK  free-coding-models already installed"
+  echo "✅ free-coding-models already installed"
 fi
 
-# Install free-claude-code proxy
-echo "Installing free-claude-code proxy..."
-uv tool install git+https://github.com/Alishahryar1/free-claude-code.git
-
-echo "Initializing free-claude-code config..."
-fcc-init  # creates ~/.config/free-claude-code/.env from built-in template
-
-echo "Verifying installation..."
-fcc --version || { echo "free-claude-code install failed"; exit 1; }
-
-# Verify installations
-echo ""
-echo "=========================================="
-echo "  Verifying Installations"
-echo "=========================================="
-echo ""
-
-echo "free-coding-models: $(which free-coding-models)"
-echo "fcc: $(which fcc)"
-
-# Test free-coding-models
-echo ""
-echo "Testing free-coding-models..."
-if free-coding-models --json --hide-unconfigured &> /dev/null; then
-    echo "OK  free-coding-models is working"
+# Install free-claude-code
+if ! uv tool list 2>/dev/null | grep -q "free-claude-code"; then
+  echo "• Installing free-claude-code..."
+  uv tool install git+https://github.com/Alishahryar1/free-claude-code.git
+  fcc-init 2>/dev/null || echo "   ⚠️  fcc-init failed (run manually if needed)"
 else
-    echo "Warning: free-coding-models may need configuration"
+  echo "✅ free-claude-code already installed"
 fi
 
-# Create necessary directories
-echo ""
-echo "=========================================="
-echo "  Creating Directories"
-echo "=========================================="
 echo ""
 
-mkdir -p ~/.frugality/cache
-mkdir -p ~/.frugality/logs
-echo "OK  Created ~/.frugality/"
+# ── Setup directories ─────────────────────────────────────────────
+echo "📁 Setting up directories..."
+mkdir -p ~/.frugality/{cache,logs}
+mkdir -p "$HOME/bin" 2>/dev/null || true
 
-# Create command wrappers in ~/bin/
-echo ""
-echo "=========================================="
-echo "  Setting Up Command Wrappers"
-echo "=========================================="
-echo ""
-
-mkdir -p "$HOME/bin"
+# ── Create wrappers ───────────────────────────────────────────────
+echo "🔧 Creating command wrappers..."
 
 FRUGALITY_PY="$PROJECT_DIR/frugality.py"
 
-# Generate claude-frugal wrapper with hardcoded path
-cat > "$HOME/bin/claude-frugal" << WRAPPER_HEADER
+# Create claude-frugal
+cat > "$HOME/bin/claude-frugal" << 'WRAPPER'
 #!/usr/bin/env bash
 set -euo pipefail
 
-FRUGALITY_PY="$FRUGALITY_PY"
-WRAPPER_HEADER
+echo "🚀 Frugality - Claude Code on Free Models"
+echo ""
 
-cat >> "$HOME/bin/claude-frugal" << 'WRAPPER_BODY'
-
-# ── Dependency checks ──────────────────────────────────────────────
-MISSING=()
+# ── Dependency check ──────────────────────────────────────────────
+missing=()
 for cmd in python3 node uv claude; do
-  command -v "$cmd" &>/dev/null || MISSING+=("$cmd")
+  if ! command -v "$cmd" &>/dev/null; then
+    missing+=("$cmd")
+  fi
 done
 
-# fcc (free-claude-code) check — installed via uv tool
+# Check free-claude-code
 if ! uv tool list 2>/dev/null | grep -q "free-claude-code"; then
-  MISSING+=("free-claude-code (run: uv tool install git+https://github.com/Alishahryar1/free-claude-code.git)")
+  missing+=("free-claude-code (uv tool install git+https://github.com/Alishahryar1/free-claude-code.git)")
 fi
 
-if [[ ${#MISSING[@]} -gt 0 ]]; then
-  echo "frugal-claude: missing dependencies:" >&2
-  printf '  - %s\n' "${MISSING[@]}" >&2
+if [[ ${#missing[@]} -gt 0 ]]; then
+  echo "❌ Missing dependencies:"
+  printf '  • %s\n' "${missing[@]}"
+  echo ""
+  echo "💡 Install missing deps:"
+  echo "   npm install -g free-coding-models"
+  echo "   curl -LsSf https://astral.sh/uv/install.sh | sh"
+  echo "   uv tool install git+https://github.com/Alishahryar1/free-claude-code.git"
+  echo ""
   exit 1
 fi
 
 # ── Model discovery ────────────────────────────────────────────────
-echo "frugal-claude: discovering models..."
-python3 "$FRUGALITY_PY" || {
-  echo "frugal-claude: model discovery failed. Aborting." >&2
-  exit 1
-}
+if [[ "${1:-}" != "--check-keys" ]]; then
+  echo "🔍 Discovering models..."
+  python3 "$(dirname "$(realpath "$0")")/../frugality.py" "$@" || {
+    echo "❌ Model discovery failed"
+    echo "💡 Try: free-coding-models (to setup API keys)"
+    exit 1
+  }
+fi
 
-# ── Verify cc-nim config was written ──────────────────────────────
+# ── Verify config ──────────────────────────────────────────────────
 CC_NIM_ENV="$HOME/.config/free-claude-code/.env"
 if [[ ! -f "$CC_NIM_ENV" ]]; then
-  echo "frugal-claude: $CC_NIM_ENV not found after discovery. Aborting." >&2
+  echo "❌ Config not found. Run: claude-frugal --refresh"
   exit 1
 fi
 
-# ── Print active model config ──────────────────────────────────────
-echo "frugal-claude: active routing:"
-grep -E '^MODEL' "$CC_NIM_ENV" | sed 's/^/  /'
+# ── Show active models ─────────────────────────────────────────────
+echo ""
+echo "📋 Active Models:"
+grep -E '^MODEL' "$CC_NIM_ENV" | sed 's/^/  /' | sed 's/="/ → /' | sed 's/"$//'
 
-# ── Launch cc-nim proxy + Claude Code ─────────────────────────────
+# ── Launch! ───────────────────────────────────────────────────────
+echo ""
+echo "🎯 Starting Claude Code..."
+echo "   (Proxy: free-claude-code)"
+echo ""
+
 exec fcc "$@"
-WRAPPER_BODY
+WRAPPER
 
-# Generate frugal-opencode wrapper
-cat > "$HOME/bin/frugal-opencode" << WRAPPER_HEADER
+# Create frugal-opencode
+cat > "$HOME/bin/frugal-opencode" << 'WRAPPER'
 #!/usr/bin/env bash
 set -euo pipefail
 
-FRUGALITY_PY="$FRUGALITY_PY"
-WRAPPER_HEADER
+echo "🚀 Frugal OpenCode - OpenCode on Free Models"
+echo ""
 
-cat >> "$HOME/bin/frugal-opencode" << 'WRAPPER_BODY'
-
-# ── Dependency checks ──────────────────────────────────────────────
-MISSING=()
+# ── Dependency check ──────────────────────────────────────────────
+missing=()
 for cmd in python3 node free-coding-models opencode; do
-  command -v "$cmd" &>/dev/null || MISSING+=("$cmd")
+  if ! command -v "$cmd" &>/dev/null; then
+    missing+=("$cmd")
+  fi
 done
 
-if [[ ${#MISSING[@]} -gt 0 ]]; then
-  echo "frugal-opencode: missing dependencies:" >&2
-  printf '  - %s\n' "${MISSING[@]}" >&2
+if [[ ${#missing[@]} -gt 0 ]]; then
+  echo "❌ Missing dependencies:"
+  printf '  • %s\n' "${missing[@]}"
+  echo ""
+  echo "💡 Install missing deps:"
+  echo "   npm install -g free-coding-models"
+  echo "   npm install -g @anthropic-ai/opencode"
+  echo ""
   exit 1
 fi
 
 # ── Cache check ───────────────────────────────────────────────────
 CACHE_DIR="$HOME/.frugality/cache"
 if [[ ! -d "$CACHE_DIR" ]] || [[ $(find "$CACHE_DIR" -mmin +60 2>/dev/null) ]]; then
-  echo "frugal-opencode: running model discovery..."
-  python3 "$FRUGALITY_PY" || {
-    echo "frugal-opencode: model discovery failed. Continuing with cached data..." >&2
+  echo "🔍 Discovering models..."
+  python3 "$(dirname "$(realpath "$0")")/../frugality.py" || {
+    echo "⚠️  Using cached model data..."
   }
 fi
 
-# ── Launch OpenCode natively ─────────────────────────────────────
+# ── Launch! ───────────────────────────────────────────────────────
+echo ""
+echo "🎯 Starting OpenCode..."
+echo ""
+
 exec opencode "$@"
-WRAPPER_BODY
+WRAPPER
 
-chmod +x "$HOME/bin/claude-frugal"
-chmod +x "$HOME/bin/frugal-opencode"
-echo "OK  Created ~/bin/claude-frugal and ~/bin/frugal-opencode"
+# Make wrappers executable
+chmod +x "$HOME/bin/claude-frugal" "$HOME/bin/frugal-opencode"
 
 echo ""
-echo "=========================================="
-echo "  Running Initial Discovery"
-echo "=========================================="
-echo ""
+echo "✅ Wrappers created in $HOME/bin/"
 
-# Run initial model discovery to populate env file
-python3 "$PROJECT_DIR/frugality.py"
+# ── Initial discovery ──────────────────────────────────────────────
 echo ""
-echo "Installation complete!"
+echo "🔍 Running initial model discovery..."
+python3 "$PROJECT_DIR/frugality.py" 2>/dev/null || {
+  echo "⚠️  Initial discovery failed"
+  echo "   Run 'claude-frugal --refresh' after setting up API keys"
+}
+
+echo ""
+echo "🎉 Installation complete!"
 echo ""
 echo "Usage:"
-echo "  claude-frugal        # Launch Claude Code via cc-nim with free models"
-echo "  frugal-opencode      # Launch OpenCode with free models"
+echo "  claude-frugal        # Start coding with free models"
+echo "  frugal-opencode      # Start OpenCode with free models"
+echo "  claude-frugal --help # Show all options"
+echo ""
+echo "💡 First time? Run 'free-coding-models' to setup API keys!"

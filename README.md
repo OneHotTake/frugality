@@ -2,82 +2,68 @@
 
 > Claude Code. Free models. Zero compromise.
 
-## v2.0.0 Migration: CCR has been retired.
-> Install the new backend: `uv tool install git+https://github.com/Alishahryar1/free-claude-code.git`
-> Then run `fcc-init` to scaffold the config, and `claude-frugal` as normal.
+**✨ Beautiful, simple, and multi-friendly.**
 
-## Fast Start
+---
 
-Already have Claude Code? One command:
+## 🚀 Fast Start
+
+One command to get started:
 
 ```bash
 npx frugality
 ```
 
-That's it. It discovers free models, picks the best ones, and launches Claude Code through them. You'll be coding in ~30 seconds.
+That's it! It discovers free models and starts Claude Code. You'll be coding in ~30 seconds.
 
 ---
 
-## How it works
+## 🎯 How It Works
 
 ```
 claude-frugal
-    |
-frugality.py  ->  free-coding-models --json  ->  tier mapping  ->  write cc-nim config
-    |
-    fcc (proxy)  ←── Anthropic-format requests
-         ├── opus slot  → NIM kimi-k2.5
-         ├── sonnet slot → NIM glm4.7
-         └── haiku slot  → OpenRouter step-3.5-flash
-         |
-         ▼
-    Claude Code
+    │
+🔍 frugality.py ─── Discovers free models
+    │
+📝 free-claude-code ── Routes to best models
+    │
+🤖 Claude Code
 ```
 
-Every launch discovers the best available free models and configures [free-claude-code](https://github.com/Alishahryar1/free-claude-code) to proxy them. Just type `claude-frugal` instead of `claude`.
-
-## Routing tiers
-
-| Tier | Models | Used for |
-|------|--------|----------|
-| **opus** | S/S+ (60-70% SWE) | Complex tasks, planning |
-| **sonnet** | S/A+ (40-70%) | Core coding work |
-| **haiku** | A/A- (20-40%) | Quota checks, topic detection |
-
-free-claude-code automatically routes Claude Code's requests to the appropriate model based on complexity.
+**Smart routing**: Automatically picks the best free model for each task:
+- Complex tasks → Fast S+ models
+- Coding → Powerful S models
+- Quick checks → Lightweight A models
+- All providers → NVIDIA NIM, OpenRouter, Groq, 16+ more
 
 ---
 
-## Install
+## 📦 Installation
 
-### What you need
-
-| Dependency | Why | Install |
-|-----------|-----|---------|
-| Python 3.7+ | Core engine | [python.org](https://www.python.org/downloads/) |
-| Node.js 18+ | Model discovery tools | [nodejs.org](https://nodejs.org/) |
-| uv | Package manager for free-claude-code | [astral.sh/uv](https://astral.sh/uv) |
-| [Claude Code](https://claude.ai/code) | What you're making cheaper | Official installer |
-
-### Step 1: Model discovery (required)
+### 1. Install Dependencies
 
 ```bash
+# Core tools
 npm install -g free-coding-models
-free-coding-models   # interactive -- walks you through API key setup
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Claude Code
+npm install -g @anthropic-ai/claude
+
+# Free Claude Code proxy
+uv tool install git+https://github.com/Alishahryar1/free-claude-code.git
 ```
 
-This discovers what free models are available from 16+ providers (NVIDIA NIM, OpenRouter, Groq, etc.). You'll set up API keys once.
-
-### Step 2: free-claude-code proxy (required)
+### 2. Setup API Keys
 
 ```bash
-uv tool install git+https://github.com/Alishahryar1/free-claude-code.git
-fcc-init  # creates initial config
+# Interactive setup
+free-coding-models
 ```
 
-free-claude-code is the proxy that sits between Claude Code and the free models. It handles protocol compliance and intelligent routing.
+Walk through the setup for providers you want to use (NVIDIA, OpenRouter, Groq, etc.).
 
-### Step 3: Frugality
+### 3. Install Frugality
 
 ```bash
 git clone https://github.com/OneHotTake/frugality.git
@@ -85,53 +71,157 @@ cd frugality
 ./scripts/install.sh
 ```
 
-The installer drops `claude-frugal` and `frugal-opencode` into `~/bin/`. Make sure that's in your `$PATH`.
-
-### Verify
+### 4. Verify Installation
 
 ```bash
-claude-frugal         # should discover models and launch
+claude-frugal --check-keys  # Check API keys
+claude-frugal --help        # See all options
 ```
 
 ---
 
-## Usage
+## 🎮 Usage
+
+### Basic Usage
 
 ```bash
-claude-frugal         # discover models + launch Claude Code
-frugal-opencode       # launch OpenCode with free models (no proxy needed)
-python3 frugality.py  # discover models and write cc-nim config only (no launch)
+claude-frugal              # Start coding with free models
+frugal-opencode            # Start OpenCode with free models
 ```
 
-## Troubleshooting
+### Advanced Options
 
 ```bash
-# Check cc-nim is installed
+claude-frugal --refresh    # Discover new models
+claude-frugal --check-keys # Verify API keys
+claude-frugal --verbose    # Debug info
+```
+
+### Example Output
+
+```
+🚀 Frugality - Claude Code on Free Models
+
+🔍 Discovering models...
+✅ Providers available: nvidia, openrouter
+
+📋 Active Models:
+  MODEL_OPUS     → DeepSeek V3        ⭐
+  MODEL_SONNET   → MiniMax M2.5       🌟
+  MODEL_HAIKU    → Mistral Large      💪
+
+🎯 Starting Claude Code...
+```
+
+---
+
+## 🛠️ Troubleshooting
+
+### Quick Fixes
+
+```bash
+# Check API keys
+claude-frugal --check-keys
+
+# Refresh model list
+claude-frugal --refresh
+
+# Test free-coding-models
+free-coding-models --json | head -5
+
+# Check free-claude-code
 fcc --version
-
-# Check active model config
-cat ~/.config/free-claude-code/.env
-
-# Re-run model discovery manually
-python3 frugality.py
-
-# Check cc-nim logs (see free-claude-code docs for flags)
-fcc --help
-
-# Check model discovery
-free-coding-models --json
-
-# Force fresh model discovery
-rm ~/.frugality/cache/last-known-good.json  # if cached
 ```
 
-## Roadmap
+### Common Issues
 
-- `--dry-run` -- preview config without writing
-- `--tier` -- override model tier selection
-- `frug doctor` -- one-command diagnostics
-- Provider auto-detection for local NIM deployments
+**❌ No models found**
+```bash
+# Setup API keys
+free-coding-models
 
-## License
+# Check output
+free-coding-models --json
+```
 
-MIT
+**❌ Missing dependencies**
+```bash
+# Install Node.js
+# Install uv
+# Install Claude Code
+```
+
+**❌ Configuration errors**
+```bash
+# Regenerate config
+claude-frugal --refresh
+
+# Check config file
+cat ~/.config/free-claude-code/.env
+```
+
+---
+
+## 🌟 Features
+
+### ✅ Multi-Provider Support
+- NVIDIA NIM (local & cloud)
+- OpenRouter
+- Groq
+- Cerebras
+- 16+ other providers
+
+### ✅ Smart Routing
+- Tier-based model selection
+- Automatic provider mixing
+- Context-aware routing
+
+### ✅ Beautiful UX
+- Clear status messages
+- Progress indicators
+- Helpful error messages
+
+### ✅ Zero Configuration
+- Automatic model discovery
+- Smart defaults
+- One-command setup
+
+---
+
+## 🔄 Migration from CCR
+
+If you're coming from CCR:
+```bash
+# Uninstall old version
+npm uninstall -g @musistudio/claude-code-router
+
+# Install new backend
+uv tool install git+https://github.com/Alishahryar1/free-claude-code.git
+
+# Setup frugality
+./scripts/install.sh
+```
+
+---
+
+## 📊 Supported Providers
+
+| Provider | Models | Cost |
+|----------|--------|------|
+| NVIDIA NIM | Llama, Mistral, Kimi | Free |
+| OpenRouter | DeepSeek, Qwen, Groq | Free tier |
+| Groq | Mixtral, Llama | Free |
+| Cerebras | Mixtral, Granite | Free |
+| 16+ more | Various | Free tiers |
+
+---
+
+## 🤝 Contributing
+
+We love contributions! See the [GitHub repo](https://github.com/OneHotTake/frugality).
+
+---
+
+## 📄 License
+
+MIT License

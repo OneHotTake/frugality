@@ -1,27 +1,42 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ── Dependency checks ──────────────────────────────────────────────
-MISSING=()
+# ── Welcome banner ───────────────────────────────────────────────
+echo "🚀 Frugal OpenCode - OpenCode on Free Models"
+echo ""
+
+# ── Dependency check ──────────────────────────────────────────────
+missing=()
 for cmd in python3 node free-coding-models opencode; do
-  command -v "$cmd" &>/dev/null || MISSING+=("$cmd")
+  if ! command -v "$cmd" &>/dev/null; then
+    missing+=("$cmd")
+  fi
 done
 
-if [[ ${#MISSING[@]} -gt 0 ]]; then
-  echo "frugal-opencode: missing dependencies:" >&2
-  printf '  - %s\n' "${MISSING[@]}" >&2
+if [[ ${#missing[@]} -gt 0 ]]; then
+  echo "❌ Missing dependencies:"
+  printf '  • %s\n' "${missing[@]}"
+  echo ""
+  echo "💡 Install missing deps:"
+  echo "   npm install -g free-coding-models"
+  echo "   npm install -g @anthropic-ai/opencode"
+  echo ""
   exit 1
 fi
 
 # ── Cache check ───────────────────────────────────────────────────
 CACHE_DIR="$HOME/.frugality/cache"
 if [[ ! -d "$CACHE_DIR" ]] || [[ $(find "$CACHE_DIR" -mmin +60 2>/dev/null) ]]; then
-  echo "frugal-opencode: running model discovery..."
+  echo "🔍 Discovering models..."
   python3 "$(dirname "$(realpath "$0")")/../frugality.py" || {
-    echo "frugal-opencode: model discovery failed. Continuing with cached data..." >&2
+    echo "⚠️  Using cached model data..."
   }
 fi
 
-# ── Launch OpenCode natively ─────────────────────────────────────
-echo "frugal-opencode: launching OpenCode..."
+# ── Launch! ───────────────────────────────────────────────────────
+echo ""
+echo "🎯 Starting OpenCode..."
+echo ""
+
+# Launch OpenCode natively
 exec opencode "$@"

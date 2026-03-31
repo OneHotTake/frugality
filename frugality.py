@@ -19,95 +19,112 @@ FCM_CONFIG_PATH = os.path.join(HOME, ".free-coding-models.json")
 CC_NIM_ENV_DIR = os.path.join(HOME, ".config", "free-claude-code")
 CC_NIM_ENV_FILE = os.path.join(CC_NIM_ENV_DIR, ".env")
 
-CERT_SCHEMA_VERSION = 1
-PROBE_VERSION = 1
-PROBE_TIMEOUT = 15
-PROBE_WORKERS = 2
-PROBE_MAX_RETRIES = 2
-PROBE_RETRY_DELAY = 2.0
-
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
+PROVIDER_PREFIXES = {
+    "nvidia": "nvidia_nim",
+    "openrouter": "open_router",
+    "groq": "groq",
+    "cerebras": "cerebras",
+    "sambanova": "sambanova",
+    "mistral": "mistral",
+    "fireworks": "fireworks",
+    "together": "together",
+    "deepinfra": "deepinfra",
+    "huggingface": "huggingface",
+    "perplexity": "perplexity",
+    "google": "google",
+    "zai": "zai",
+    "hyperbolic": "hyperbolic",
+    "siliconflow": "siliconflow",
+    "scaleway": "scaleway",
+    "qwen": "qwen",
+    "iflow": "iflow",
+}
 
-def _nim_prefix(model_id):
-    """Add nvidia_nim/ prefix to model ID."""
-    if model_id.startswith("nvidia_nim/"):
-        return model_id
-    return f"nvidia_nim/{model_id}"
+def normalize_model_id(provider, model_id):
+    """Normalize model ID with provider prefix."""
+    prefix = PROVIDER_PREFIXES.get(provider, provider)
+    # Clean up model ID (remove :free, -instruct, etc.)
+    model_id = model_id.replace(":free", "")
+    model_id = model_id.replace("-instruct", "")
 
+    # Split on / and lowercase the organization part
+    parts = model_id.split("/")
+    if len(parts) > 1:
+        parts[0] = parts[0].lower()  # lowercase org name
+        model_id = "/".join(parts)
 
-def _openrouter_prefix(model_id):
-    """Add open_router/ prefix to model ID."""
-    if model_id.startswith("open_router/"):
-        return model_id
-    return f"open_router/{model_id}"
+    if not model_id.startswith(prefix + "/"):
+        return f"{prefix}/{model_id}"
+    return model_id
 
+def get_model_display_name(model_id):
+    """Get clean display name for model."""
+    # Remove provider prefix
+    for prefix in PROVIDER_PREFIXES.values():
+        if model_id.startswith(prefix + "/"):
+            model_id = model_id[len(prefix + "/"):]
+            break
 
-def _needs_thinking(model_id):
-    """Check if model needs NIM thinking mode enabled."""
-    thinking_keywords = ["kimi", "nemotron", "deepseek-r1", "qwq"]
-    return any(keyword in model_id.lower() for keyword in thinking_keywords)
+    # Clean up common naming patterns
+    model_id = model_id.replace(":free", "")
+    model_id = model_id.replace("-instruct", "")
+    model_id = model_id.replace("-chat", "")
 
+    # Split on / and take last part
+    return model_id.split("/")[-1]
 
-def _normalize_provider(provider):
-    """Normalize provider name to lowercase."""
-    return provider.strip().lower()
+def classify_call_weight(message_count, has_tools, prompt_length):
+    """Classify call weight for smart routing."""
+    if message_count <= 2 and not has_tools and prompt_length < 500:
+        return "lightweight"
+    return "heavy"
 
+def get_existing_keys():
+    """Check which API keys are available."""
+    keys = {}
 
-def _registry_key(provider, model_id):
-    """Generate registry key for model."""
-    return f"{_normalize_provider(provider)},{model_id}"
+    # Check free-coding-models.json
+    if os.path.exists(FCM_CONFIG_PATH):
+        try:
+            with open(FCM_CONFIG_PATH) as f:
+                fcm_data = json.load(f)
+                # Check both provider names and their variations
+                all_providers = set(PROVIDER_PREFIXES.keys())
+                # Add common aliases
+                all_providers.update(["nvidia", "openrouter", "groq", "cerebras", "mistral"])
 
+                for provider in all_providers:
+                    if provider in fcm_data:
+                        keys[provider] = True
+        except Exception:
+            pass
 
-def atomic_write(path, content):
-    """Write content to path atomically."""
-    dir_name = os.path.dirname(path)
-    if dir_name and not os.path.exists(dir_name):
-        os.makedirs(dir_name, exist_ok=True)
+    # Check existing cc-nim config
+    if os.path.exists(CC_NIM_ENV_FILE):
+        try:
+            with open(CC_NIM_ENV_FILE) as f:
+                content = f.read()
+                # Look for API key patterns
+                for provider in PROVIDER_PREFIXES.keys():
+                    key_name = f"{provider.upper()}_API_KEY="
+                    if key_name in content:
+                        keys[provider] = True
+        except Exception:
+            pass
 
-    temp_path = path + ".tmp"
-    with open(temp_path, "w") as f:
-        f.write(content)
-
-    # Preserve existing user settings by merging if file exists
-    if os.path.exists(path):
-        with open(path, "r") as existing:
-            existing_content = existing.read()
-
-        # Extract only frugality-managed lines
-        lines = content.splitlines()
-        frugality_lines = []
-        for line in lines:
-            if line.startswith(("NVIDIA_NIM_API_KEY", "OPENROUTER_API_KEY", "MODEL_OPUS",
-                              "MODEL_SONNET", "MODEL_HAIKU", "MODEL", "NIM_ENABLE_THINKING")):
-                frugality_lines.append(line)
-
-        # Write merged content
-        with open(path, "w") as f:
-            f.write(existing_content)
-            if existing_content and not existing_content.endswith("\n"):
-                f.write("\n")
-            f.write("\n")
-            f.write("# Managed by Frugality\n")
-            f.write("# Last updated: " + datetime.now().isoformat() + "\n")
-            for line in frugality_lines:
-                f.write(line + "\n")
-    else:
-        os.rename(temp_path, path)
-
+    return keys
 
 def get_fcm_data():
     """Get model data from free-coding-models."""
     try:
         logger.debug("Running free-coding-models discovery")
 
-        # Use a more reliable method to get JSON data
-        import subprocess
-        try:
-            # Use node to parse the JSON properly
-            result = subprocess.run(
-                """
+        # Use node for reliable JSON parsing
+        result = subprocess.run(
+            """
 node -e "
 const { execSync } = require('child_process');
 try {
@@ -125,256 +142,256 @@ try {
 }
 "
 """,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
 
-            if result.stdout:
-                data = json.loads(result.stdout.strip())
-                logger.debug("FCM returned %d models" % len(data))
-                return data
-        except Exception:
-            pass
+        if result.stdout:
+            data = json.loads(result.stdout.strip())
+            logger.debug("FCM returned %d models" % len(data))
 
-        # Final fallback: return empty list
-        logger.warning("Could not get FCM data, using empty list")
+            # Clean up model data
+            for model in data:
+                # Ensure provider exists
+                if "provider" not in model:
+                    model["provider"] = "unknown"
+
+                # Normalize tier
+                tier = model.get("tier", "unknown")
+                if tier.startswith(("S+", "S", "A", "B", "C")):
+                    model["tier"] = tier
+                else:
+                    model["tier"] = "unknown"
+
+            return data
+
+        logger.warning("No models found")
         return []
 
     except Exception as e:
         logger.warning("Model discovery failed: %s" % e)
-        return None
-        logger.debug("FCM returned %d models" % len(data))
+        return []
 
-        if not isinstance(data, list) or len(data) == 0:
-            raise Exception("FCM output is not a non-empty JSON array")
+def select_best_models(models, available_providers):
+    """Select best models for each tier."""
+    if not models:
+        return {}
 
-        first = data[0]
-        if "modelId" not in first or "tier" not in first:
-            missing = []
-            if "modelId" not in first:
-                missing.append("modelId")
-            if "tier" not in first:
-                missing.append("tier")
-            logger.warning(
-                "FCM output schema has changed -- missing fields: %s. Update frugality.py tier mapping to match new schema."
-                % missing
-            )
-            raise Exception("FCM output missing required fields")
+    # Clean up model data
+    for model in models:
+        # Clean model ID
+        model["modelId"] = model["modelId"].replace(":free", "")
+        model["modelId"] = model["modelId"].replace("-instruct", "")
+        model["modelId"] = model["modelId"].lower()
 
-        return data
-    except Exception as e:
-        logger.warning("Model discovery failed: %s" % e)
-        return None
+    # Separate models by provider
+    provider_models = {}
+    for provider in available_providers:
+        provider_models[provider] = [m for m in models if m.get("provider") == provider]
 
+    # Sort models within each provider by score
+    for provider, models_list in provider_models.items():
+        models_list.sort(key=lambda m: (
+            -float(m.get("sweScore", "0").rstrip("%").replace(".", "")),
+            -len(m.get("context", "0")),
+        ))
 
-def get_existing_keys():
-    """Check which API keys already exist."""
-    keys = {}
+    # Select best models overall
+    selected = {}
 
-    # Check free-coding-models.json
-    if os.path.exists(FCM_CONFIG_PATH):
-        try:
-            with open(FCM_CONFIG_PATH) as f:
-                fcm_data = json.load(f)
-                for provider in ["nvidia", "openrouter"]:
-                    if provider in fcm_data:
-                        keys[provider] = True
-        except Exception:
-            pass
-
-    # Check existing cc-nim config
-    if os.path.exists(CC_NIM_ENV_FILE):
-        try:
-            with open(CC_NIM_ENV_FILE) as f:
-                content = f.read()
-                if "NVIDIA_NIM_API_KEY=" in content:
-                    keys["nvidia"] = True
-                if "OPENROUTER_API_KEY=" in content:
-                    keys["openrouter"] = True
-        except Exception:
-            pass
-
-    return keys
-
-
-def _map_to_slots(models, preferred_provider=None):
-    """Map models to cc-nim slots based on tier and provider."""
-    slots = {}
-
-    # Sort models by tier and provider preference
-    sorted_models = sorted(models, key=lambda m: (
-        -int(m.get("sweScore", "0").rstrip("%").replace(".", "")),
-        1 if preferred_provider and m.get("provider") == preferred_provider else 0,
-        -len(m.get("context", "0"))
+    # Find best overall models
+    all_sorted = sorted(models, key=lambda m: (
+        -float(m.get("sweScore", "0").rstrip("%").replace(".", "")),
+        -len(m.get("context", "0")),
     ))
 
-    # Assign best model to each slot
-    s_plus_s_models = [m for m in sorted_models if m.get("tier") in ["S+", "S"]]
-
-    if s_plus_s_models:
-        # Best for OPUS (complex tasks)
-        slots["MODEL_OPUS"] = s_plus_s_models[0]["modelId"]
-
-        # Best for SONNET (core coding)
-        if len(s_plus_s_models) > 1:
-            slots["MODEL_SONNET"] = s_plus_s_models[1]["modelId"]
-        else:
-            slots["MODEL_SONNET"] = s_plus_s_models[0]["modelId"]
-
-        # Best for HAIKU (lightweight)
-        a_models = [m for m in sorted_models if m.get("tier") in ["A", "A+", "A-"]]
-        if a_models:
-            slots["MODEL_HAIKU"] = a_models[0]["modelId"]
-        else:
-            slots["MODEL_HAIKU"] = s_plus_s_models[0]["modelId"]
-
-        # Fallback MODEL
-        slots["MODEL"] = s_plus_s_models[0]["modelId"]
-
-    return slots
-
-
-def write_env_file(selected, provider_keys):
-    """Write cc-nim config to ~/.config/free-claude-code/.env."""
-    lines = []
-
-    # Determine provider prefixes
-    nim_available = provider_keys.get("nvidia", False)
-    openrouter_available = provider_keys.get("openrouter", False)
-
-    # Build model assignments with provider prefixes
-    if nim_available:
-        lines.append('NVIDIA_NIM_API_KEY="nvapi-..."')
-        lines.append("")
-    if openrouter_available:
-        lines.append('OPENROUTER_API_KEY="sk-or-..."')
-        lines.append("")
+    # Tier-based selection
+    s_plus_models = [m for m in all_sorted if m.get("tier") == "S+"]
+    s_models = [m for m in all_sorted if m.get("tier") == "S"]
+    a_models = [m for m in all_sorted if m.get("tier") in ["A", "A+", "A-"]]
+    b_models = [m for m in all_sorted if m.get("tier") in ["B", "B+", "B-"]]
 
     # Model assignments
-    for slot, model_id in selected.items():
-        prefix = ""
-        if nim_available and "nvidia" in model_id:
-            prefix = _nim_prefix(model_id)
-        elif openrouter_available and "openrouter" in model_id:
-            prefix = _openrouter_prefix(model_id)
-        else:
-            # Default to NIM prefix
-            prefix = _nim_prefix(model_id)
+    if s_plus_models:
+        selected["MODEL_OPUS"] = s_plus_models[0]  # Complex tasks
+    elif s_models:
+        selected["MODEL_OPUS"] = s_models[0]
 
-        lines.append(f'{slot}="{prefix}"')
+    if s_models:
+        selected["MODEL_SONNET"] = s_models[0]  # Core coding
+    elif s_plus_models:
+        selected["MODEL_SONNET"] = s_plus_models[0]
 
-    # Determine if thinking mode should be enabled
+    if a_models:
+        selected["MODEL_HAIKU"] = a_models[0]  # Lightweight
+    elif s_models:
+        selected["MODEL_HAIKU"] = s_models[0]
+
+    # Fallback
+    if selected:
+        selected["MODEL"] = list(selected.values())[0]
+
+    return selected
+
+def write_env_file(selected_models, available_providers):
+    """Write cc-nim config."""
+    lines = []
+
+    # Add API key placeholders for available providers
+    for provider in available_providers:
+        prefix = PROVIDER_PREFIXES[provider]
+        key_name = f"{prefix.upper()}_API_KEY"
+        lines.append(f'{key_name}="sk-or-..."')
+
+    lines.append("")  # Empty line
+
+    # Add model assignments
+    for slot, model in selected_models.items():
+        model_id = normalize_model_id(model["provider"], model["modelId"])
+        lines.append(f'{slot}="{model_id}"')
+
+    # Add thinking mode detection
     thinking_enabled = False
-    if "MODEL_SONNET" in selected:
-        sonnet_model = selected["MODEL_SONNET"]
-        if any(keyword in sonnet_model.lower() for keyword in ["kimi", "nemotron", "deepseek-r1", "qwq"]):
+    for slot, model in selected_models.items():
+        model_id = model["modelId"].lower()
+        if any(keyword in model_id for keyword in ["kimi", "nemotron", "deepseek-r1", "qwq", "reasoning"]):
             thinking_enabled = True
+            break
 
     lines.append("")
     lines.append(f'NIM_ENABLE_THINKING={"true" if thinking_enabled else "false"}')
 
     # Write atomically
-    content = "\n".join(lines)
-    atomic_write(CC_NIM_ENV_FILE, content)
-    logger.info("Wrote cc-nim config to %s" % CC_NIM_ENV_FILE)
+    atomic_write(CC_NIM_ENV_FILE, "\n".join(lines))
 
+def atomic_write(path, content):
+    """Write content atomically with backup."""
+    dir_name = os.path.dirname(path)
+    if dir_name and not os.path.exists(dir_name):
+        os.makedirs(dir_name, exist_ok=True)
 
-def print_summary(selected, provider_keys):
-    """Print summary of model selections."""
-    print("\nfrugal-claude: model routing summary:")
+    # Backup existing file
+    if os.path.exists(path):
+        backup_path = path + ".backup"
+        with open(path, "r") as src, open(backup_path, "w") as dst:
+            dst.write(src.read())
+
+        # Read existing content
+        with open(path, "r") as f:
+            existing = f.read()
+
+        # Find start and end of frugality-managed section
+        start_marker = "# Managed by Frugality\n"
+        end_marker = "# End of Frugality config\n"
+
+        # Prepare new content
+        new_content = existing
+        if start_marker in existing:
+            start_idx = existing.find(start_marker)
+            end_idx = existing.find(end_marker, start_idx)
+            if end_idx != -1:
+                new_content = existing[:start_idx] + start_marker + content + end_marker + "\n"
+
+        # Write if changed
+        if new_content != existing:
+            temp_path = path + ".tmp"
+            with open(temp_path, "w") as f:
+                f.write(new_content)
+            os.replace(temp_path, path)
+    else:
+        # New file
+        temp_path = path + ".tmp"
+        with open(temp_path, "w") as f:
+            f.write("# Managed by Frugality\n")
+            f.write(content)
+            f.write("# End of Frugality config\n")
+        os.replace(temp_path, path)
+
+    logger.info("Wrote config to %s" % path)
+
+def print_summary(selected_models, available_providers):
+    """Print beautiful summary."""
+    print("\n🚀 Frugality - Model Routing")
     print("=" * 50)
 
-    nim_available = provider_keys.get("nvidia", False)
-    openrouter_available = provider_keys.get("openrouter", False)
+    # Print active providers
+    if available_providers:
+        print("✅ Providers available: %s" % ", ".join(available_providers))
+    else:
+        print("❌ No providers configured")
 
+    # Print model assignments
     for slot in ["MODEL_OPUS", "MODEL_SONNET", "MODEL_HAIKU", "MODEL"]:
-        if slot in selected:
-            model_id = selected[slot]
-            provider = "unknown"
+        if slot in selected_models:
+            model = selected_models[slot]
+            model_id = normalize_model_id(model["provider"], model["modelId"])
+            display_name = get_model_display_name(model_id)
 
-            if nim_available and "nvidia" in model_id:
-                provider = "NVIDIA NIM"
-            elif openrouter_available and "openrouter" in model_id:
-                provider = "OpenRouter"
-            else:
-                provider = "NVIDIA NIM"
+            # Get tier
+            tier = model.get("tier", "unknown")
+            tier_emoji = {"S+": "⭐", "S": "🌟", "A": "💪", "B": "🔧", "C": "🔰"}.get(tier, "❓")
 
-            # Get tier from model ID mapping
-            tier = "unknown"
-            if "S+" in model_id or "S" in model_id:
-                tier = "S+/S"
-            elif "A" in model_id or "A+" in model_id:
-                tier = "A"
+            # Get thinking status
+            thinking = ""
+            model_lower = model["modelId"].lower()
+            if any(keyword in model_lower for keyword in ["kimi", "nemotron", "deepseek-r1", "qwq"]):
+                thinking = " 🧠"
 
-            print(f"{slot:<12} → {model_id:<35} ({provider}, {tier})")
+            print(f"{slot:<12} → {display_name:<25} {tier_emoji} {thinking}")
 
     print("=" * 50)
-    print("Providers available: %s" % (
-        ", ".join(k for k, v in provider_keys.items() if v)
-    ))
-
+    print("💡 Tip: Run 'claude-frugal' to start coding with free models!")
 
 def main():
-    parser = argparse.ArgumentParser(description="Frugality - Free model routing for cc-nim")
+    parser = argparse.ArgumentParser(description="Frugality - Free model routing")
     parser.add_argument("--refresh", action="store_true", help="Force fresh model discovery")
     parser.add_argument("--verbose", action="store_true", help="Verbose logging")
+    parser.add_argument("--check-keys", action="store_true", help="Check API keys only")
     args = parser.parse_args()
 
     if args.verbose:
         logger.setLevel(logging.DEBUG)
 
-    logger.info("frugal-claude: discovering models for cc-nim...")
+    # Special handling for check-keys
+    if args.check_keys:
+        available_providers = get_existing_keys()
+        if available_providers:
+            print("✅ Found API keys for: %s" % ", ".join(available_providers.keys()))
+        else:
+            print("❌ No API keys found")
+            print("💡 Run: free-coding-models (interactive setup)")
+        return
 
-    # Get existing keys
-    provider_keys = get_existing_keys()
-    logger.debug("Available providers: %s" % list(provider_keys.keys()))
+    logger.info("Discovering free models...")
+
+    # Get available providers
+    available_providers = get_existing_keys()
+    logger.debug("Available providers: %s" % list(available_providers.keys()))
 
     # Get model data
     models = get_fcm_data()
     if not models:
-        logger.error("Model discovery failed")
-        print("frugal-claude: error - no models discovered. Check your API keys and network.")
+        print("❌ No models found. Check your API keys and network.")
+        print("💡 Tip: Run 'free-coding-models' to configure providers")
         sys.exit(1)
 
-    # Map models to slots
-    preferred_provider = "nvidia" if provider_keys.get("nvidia") else None
-    selected = _map_to_slots(models, preferred_provider)
+    # Select best models
+    selected = select_best_models(models, available_providers)
 
     if not selected:
-        logger.error("No suitable models found")
-        print("frugal-claude: error - no models selected. Try --refresh to discover more.")
+        print("❌ No suitable models found.")
+        print("💡 Tip: Check your API keys or try --refresh")
         sys.exit(1)
 
     # Write config
-    write_env_file(selected, provider_keys)
+    write_env_file(selected, available_providers)
 
     # Print summary
-    print_summary(selected, provider_keys)
+    print_summary(selected, available_providers)
 
-    logger.info("Configuration complete")
-
+    logger.info("✅ Configuration complete")
 
 if __name__ == "__main__":
     main()
-
-# Inline tests
-assert _nim_prefix("moonshotai/kimi-k2.5") == "nvidia_nim/moonshotai/kimi-k2.5"
-assert _openrouter_prefix("deepseek/deepseek-r1-0528:free") == "open_router/deepseek/deepseek-r1-0528:free"
-
-assert _needs_thinking("nvidia_nim/moonshotai/kimi-k2.5") == True
-assert _needs_thinking("nvidia_nim/stepfun-ai/step-3.5-flash") == False
-assert _needs_thinking("nvidia_nim/mistralai/devstral-2-123b") == False
-
-mock_models = [
-    {"modelId": "kimi-k2.5", "tier": "S+", "provider": "nvidia", "sweScore": "71.3%"},
-    {"modelId": "glm4.7", "tier": "S", "provider": "nvidia", "sweScore": "65.0%"},
-    {"modelId": "step-3.5-flash", "tier": "A", "provider": "nvidia", "sweScore": "58.2%"},
-]
-slots = _map_to_slots(mock_models, preferred_provider="nvidia")
-assert "MODEL_OPUS" in slots
-assert "MODEL_HAIKU" in slots
-assert slots["MODEL_HAIKU"] != slots["MODEL_OPUS"]
-
-print("All inline tests passed.")
