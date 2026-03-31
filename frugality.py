@@ -21,6 +21,7 @@ FCM_CONFIG_PATH = os.path.join(HOME, ".free-coding-models.json")
 CC_NIM_ENV_DIR = os.path.join(HOME, ".config", "free-claude-code")
 CC_NIM_ENV_FILE = os.path.join(CC_NIM_ENV_DIR, ".env")
 CACHE_DIR = os.path.join(HOME, ".frugality")
+LOCAL_ENDPOINTS_PATH = os.path.join(CACHE_DIR, "local_endpoints.json")
 
 # Probe constants
 PROBE_VERSION = 1
@@ -174,16 +175,17 @@ def get_existing_keys():
         try:
             with open(FCM_CONFIG_PATH) as f:
                 fcm_data = json.load(f)
-                # Check apiKeys section
+                # Check apiKeys section (skip local providers - those come from local_endpoints)
+                local_providers = {"ollama", "litellm"}
                 if "apiKeys" in fcm_data:
                     for provider in PROVIDER_PREFIXES.keys():
-                        if provider in fcm_data["apiKeys"]:
+                        if provider in fcm_data["apiKeys"] and provider not in local_providers:
                             keys[provider] = True
                 # Also check top-level for backward compatibility
                 all_providers = set(PROVIDER_PREFIXES.keys())
                 all_providers.update(["nvidia", "openrouter", "groq", "cerebras", "mistral"])
                 for provider in all_providers:
-                    if provider in fcm_data:
+                    if provider in fcm_data and provider not in local_providers:
                         keys[provider] = True
         except Exception:
             pass
@@ -201,108 +203,192 @@ def get_existing_keys():
         except Exception:
             pass
 
+    # Check local endpoints (Ollama etc.)
+    if os.path.exists(LOCAL_ENDPOINTS_PATH):
+        try:
+            with open(LOCAL_ENDPOINTS_PATH) as f:
+                data = json.load(f)
+                for name, ep in data.get("endpoints", {}).items():
+                    keys[name] = ep.get("url", True)
+        except Exception:
+            pass
+
     return keys
 
-def get_ollama_models():
-    """Get models directly from local Ollama instance using OpenAI-compatible /v1/models."""
-    import urllib.request
-    import urllib.error
+def load_local_endpoints():
+    """Load local endpoint config from ~/.frugality/local_endpoints.json.
+    Auto-discovers Ollama on first run if file doesn't exist."""
+    if os.path.exists(LOCAL_ENDPOINTS_PATH):
+        try:
+            with open(LOCAL_ENDPOINTS_PATH) as f:
+                data = json.load(f)
+                if "endpoints" in data:
+                    return data
+        except Exception:
+            pass
 
-    # Find Ollama URL from config
-    ollama_url = None
+    # Auto-discover Ollama on first run
+    endpoints = _discover_local_endpoints()
+    if endpoints["endpoints"]:
+        save_local_endpoints(endpoints)
+    return endpoints
+
+def save_local_endpoints(endpoints):
+    """Write local endpoints cache atomically."""
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    tmp = LOCAL_ENDPOINTS_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(endpoints, f, indent=2)
+    os.replace(tmp, LOCAL_ENDPOINTS_PATH)
+
+def _discover_local_endpoints():
+    """Probe common Ollama ports and return endpoints dict."""
+    endpoints = {"endpoints": {}}
+    candidates = [
+        "http://localhost:11434",
+        "http://127.0.0.1:11434",
+    ]
+
+    # Try to find LAN IPs from local subnet
+    try:
+        import socket
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+        prefix = ".".join(local_ip.split(".")[:3])
+        for last_octet in ["19", "2", "1"]:
+            candidates.append(f"http://{prefix}.{last_octet}:11434")
+    except Exception:
+        pass
+
+    # Also try adjacent subnets (192.168.0-5.x)
+    for subnet in range(6):
+        for last_octet in ["19", "2"]:
+            candidates.append(f"http://192.168.{subnet}.{last_octet}:11434")
+
+    # Migration: check old apiKeys.ollama in free-coding-models.json
     if os.path.exists(FCM_CONFIG_PATH):
         try:
             with open(FCM_CONFIG_PATH) as f:
                 fcm_data = json.load(f)
-                api_keys = fcm_data.get("apiKeys", {})
-                if "ollama" in api_keys:
-                    ollama_url = api_keys["ollama"]
-                elif "litellm" in api_keys:
-                    ollama_url = api_keys["litellm"]
+                for key in ["ollama", "litellm"]:
+                    url = fcm_data.get("apiKeys", {}).get(key)
+                    if url and url not in candidates:
+                        candidates.insert(0, url.rstrip("/"))
         except Exception:
             pass
 
-    if not ollama_url:
+    for url in candidates:
+        try:
+            req = urllib.request.Request(f"{url.rstrip('/')}/v1/models")
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                json.loads(resp.read().decode())
+            # If we get here, Ollama is responding
+            endpoints["endpoints"]["ollama"] = {
+                "url": url.rstrip("/"),
+                "type": "ollama",
+                "last_seen": datetime.now().isoformat(),
+            }
+            return endpoints
+        except Exception:
+            continue
+
+    return endpoints
+
+def get_ollama_models():
+    """Get models directly from local Ollama instance using OpenAI-compatible /v1/models."""
+    endpoints = load_local_endpoints()
+    ollama_endpoints = {
+        name: ep for name, ep in endpoints.get("endpoints", {}).items()
+        if ep.get("type") == "ollama"
+    }
+
+    if not ollama_endpoints:
         return []
 
-    # Strip trailing slash
-    ollama_url = ollama_url.rstrip("/")
+    all_models = []
+    updated = False
+    for name, ep in ollama_endpoints.items():
+        ollama_url = ep["url"].rstrip("/")
 
-    # Fetch models via /v1/models (OpenAI-compatible)
-    try:
-        req = urllib.request.Request(f"{ollama_url}/v1/models")
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode())
+        try:
+            req = urllib.request.Request(f"{ollama_url}/v1/models")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
 
-        ollama_models = []
-        for model_entry in data.get("data", []):
-            model_id = model_entry.get("id", "")
-            if not model_id:
-                continue
+            ep["last_seen"] = datetime.now().isoformat()
+            updated = True
 
-            # Determine context size from model name
-            context = "32k"
-            if "64k" in model_id.lower():
-                context = "64k"
-            elif "128k" in model_id.lower():
-                context = "128k"
+            for model_entry in data.get("data", []):
+                model_id = model_entry.get("id", "")
+                if not model_id:
+                    continue
 
-            # Determine parameter count from model name for tier assignment
-            param_b = 0
-            for suffix in ["70b", "72b", "65b"]:
-                if suffix in model_id.lower():
-                    param_b = int(suffix.replace("b", ""))
-                    break
-            if param_b == 0:
-                for suffix in ["33b", "32b", "30b"]:
+                # Determine context size from model name
+                context = "32k"
+                if "64k" in model_id.lower():
+                    context = "64k"
+                elif "128k" in model_id.lower():
+                    context = "128k"
+
+                # Determine parameter count from model name for tier assignment
+                param_b = 0
+                for suffix in ["70b", "72b", "65b"]:
                     if suffix in model_id.lower():
                         param_b = int(suffix.replace("b", ""))
                         break
-            if param_b == 0:
-                for suffix in ["20b", "14b", "13b"]:
-                    if suffix in model_id.lower():
-                        param_b = int(suffix.replace("b", ""))
-                        break
-            if param_b == 0:
-                for suffix in ["8b", "7b"]:
-                    if suffix in model_id.lower():
-                        param_b = int(suffix.replace("b", ""))
-                        break
+                if param_b == 0:
+                    for suffix in ["33b", "32b", "30b"]:
+                        if suffix in model_id.lower():
+                            param_b = int(suffix.replace("b", ""))
+                            break
+                if param_b == 0:
+                    for suffix in ["20b", "14b", "13b"]:
+                        if suffix in model_id.lower():
+                            param_b = int(suffix.replace("b", ""))
+                            break
+                if param_b == 0:
+                    for suffix in ["8b", "7b"]:
+                        if suffix in model_id.lower():
+                            param_b = int(suffix.replace("b", ""))
+                            break
 
-            # Tier for local models: larger params + context = higher tier
-            ctx_k = int(context.replace("k", ""))
-            if param_b >= 65 and ctx_k >= 128:
-                tier = "S+ (Local)"
-            elif param_b >= 30 and ctx_k >= 32:
-                tier = "S (Local)"
-            elif param_b >= 13 and ctx_k >= 16:
-                tier = "A+ (Local)"
-            else:
-                tier = "A (Local)"
+                # Tier for local models: larger params + context = higher tier
+                ctx_k = int(context.replace("k", ""))
+                if param_b >= 65 and ctx_k >= 128:
+                    tier = "S+ (Local)"
+                elif param_b >= 30 and ctx_k >= 32:
+                    tier = "S (Local)"
+                elif param_b >= 13 and ctx_k >= 16:
+                    tier = "A+ (Local)"
+                else:
+                    tier = "A (Local)"
 
-            ollama_models.append({
-                "modelId": model_id,
-                "label": model_id,
-                "provider": "ollama",
-                "tier": tier,
-                "sweScore": f"{min(param_b * 0.8, 75):.1f}%",
-                "context": context,
-                "latestPing": 0,
-                "avgPing": 0,
-                "p95": 0,
-                "jitter": 0,
-                "stability": 100,
-                "uptime": 100,
-                "verdict": "Local",
-                "status": "up",
-            })
+                all_models.append({
+                    "modelId": model_id,
+                    "label": model_id,
+                    "provider": "ollama",
+                    "tier": tier,
+                    "sweScore": f"{min(param_b * 0.8, 75):.1f}%",
+                    "context": context,
+                    "latestPing": 0,
+                    "avgPing": 0,
+                    "p95": 0,
+                    "jitter": 0,
+                    "stability": 100,
+                    "uptime": 100,
+                    "verdict": "Local",
+                    "status": "up",
+                })
 
-        logger.debug("Ollama: found %d models at %s" % (len(ollama_models), ollama_url))
-        return ollama_models
+            logger.debug("Ollama: found %d models at %s" % (len(all_models), ollama_url))
 
-    except Exception as e:
-        logger.debug("Ollama discovery failed: %s" % e)
-        return []
+        except Exception as e:
+            logger.debug("Ollama discovery failed for %s: %s" % (ollama_url, e))
+
+    if updated:
+        save_local_endpoints(endpoints)
+
+    return all_models
 
 def get_fcm_data():
     """Get model data from free-coding-models."""
@@ -1260,7 +1346,19 @@ def main():
     if args.check_keys:
         available_providers = get_existing_keys()
         if available_providers:
-            print("✅ Found API keys for: %s" % ", ".join(available_providers.keys()))
+            # Separate remote providers from local endpoints
+            remote = {k: v for k, v in available_providers.items() if v is True}
+            local = {k: v for k, v in available_providers.items() if v is not True}
+
+            if remote:
+                print("✅ Found API keys for: %s" % ", ".join(remote.keys()))
+            if local:
+                for name, url in local.items():
+                    display = get_provider_display_name("", name)
+                    print(f"🏠 {display} ({url})")
+            if not remote and not local:
+                print("❌ No API keys found")
+                print("💡 Run: free-coding-models (interactive setup)")
         else:
             print("❌ No API keys found")
             print("💡 Run: free-coding-models (interactive setup)")
